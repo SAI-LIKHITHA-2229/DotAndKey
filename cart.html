@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>try{if(!localStorage.getItem("dk_current_user"))location.replace("login.html");}catch(e){}</script>
+    <title>Cart - Dot & Key</title>
+    <link rel="stylesheet" href="style.css?v=18">
+</head>
+<body class="cart-page">
+
+    <header class="navbar">
+        <a href="index.html" class="logo"><img src="images/logo.png" alt="Dot &amp; Key"></a>
+        <nav class="nav-links">
+            <a href="index.html" class="nav-link" aria-label="Home">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v10h12V10"/><path d="M10 20v-6h4v6"/></svg>
+                <span>Home</span>
+            </a>
+            <a href="shop.html" class="nav-link" aria-label="Shop">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14l1 13H4z"/><path d="M8.5 7V5.5a3.5 3.5 0 0 1 7 0V7"/></svg>
+                <span>Shop</span>
+            </a>
+            <a href="cart.html" class="nav-link" aria-label="Cart">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2l2.3 11.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6L22 8H6"/><circle cx="9.5" cy="20" r="1.4"/><circle cx="17.5" cy="20" r="1.4"/></svg>
+                <span>Cart</span>
+            </a>
+            <a href="account.html" class="nav-link" aria-label="Account">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/></svg>
+                <span>Account</span>
+            </a>
+        </nav>
+    </header>
+
+    <section class="cart-section">
+        <h2>Your Cart</h2>
+        <div id="cartItems"></div>
+        <p id="cartTotal"></p>
+
+        <div class="free-shipping" id="freeShipping" hidden>
+            <span class="truck-track" aria-hidden="true">
+                <svg class="truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 6h12v9H1z"/><path d="M13 9h4l3 3v3h-7z"/>
+                    <circle cx="6" cy="18" r="1.7"/><circle cx="16.5" cy="18" r="1.7"/>
+                </svg>
+            </span>
+            <span>Woohoo! <strong>Free shipping</strong> on this order</span>
+        </div>
+
+        <div class="free-gifts" id="freeGifts" hidden>
+            <p class="free-gifts-head" id="freeGiftsHead"></p>
+            <div class="free-gifts-list" id="freeGiftsList"></div>
+        </div>
+
+        <p class="prepaid-note" id="prepaidNote" hidden></p>
+
+        <button class="checkout-btn" id="checkoutBtn" hidden>Checkout</button>
+
+        <div class="payment-options" id="paymentOptions" hidden></div>
+
+        <p class="cart-empty-msg" id="cartEmptyMsg" hidden>Your cart is empty — your order has been placed. 🎉</p>
+    </section>
+
+    <section class="cart-section cart-recs">
+        <h3>You may also like</h3>
+        <div class="product-grid" id="cartRecommendGrid"></div>
+    </section>
+
+    <div id="productModal" class="modal-overlay">
+        <div class="modal-content">
+            <span id="closeModal" class="close-btn">&times;</span>
+            <img id="modalImage" src="" alt="">
+            <div class="modal-details">
+                <h2 id="modalName"></h2>
+                <p id="modalPrice"></p>
+                <button id="modalAddToCart">Add to Cart</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="order-success" id="orderSuccess" hidden>
+        <div class="order-success-card">
+            <svg class="tick" viewBox="0 0 52 52" aria-hidden="true">
+                <circle class="tick-circle" cx="26" cy="26" r="24"/>
+                <path class="tick-check" d="M14 27l8 8 16-16"/>
+            </svg>
+            <h2>Order Placed!</h2>
+            <p>Your order is confirmed. Pay with cash when it arrives.</p>
+            <a href="shop.html" class="pay-confirm-btn">Continue Shopping</a>
+        </div>
+    </div>
+
+    <script src="script.js?v=18"></script>
+</body>
+</html>

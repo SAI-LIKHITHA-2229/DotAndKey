@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In - Dot & Key</title>
+    <link rel="stylesheet" href="style.css?v=18">
+</head>
+<body class="auth-page">
+
+    <header class="navbar">
+        <a href="index.html" class="logo"><img src="images/logo.png" alt="Dot &amp; Key"></a>
+    </header>
+
+    <section class="auth-screen">
+        <div class="auth-card">
+            <h2 id="authTitle">Sign In</h2>
+            <p class="auth-sub" id="authSub">Welcome back to Dot &amp; Key</p>
+
+            <form id="authForm" class="auth-form">
+                <label class="auth-field">
+                    <span>Username</span>
+                    <input type="text" id="authUser" autocomplete="username" autocapitalize="none" required>
+                    <ul class="req-list" id="userReqs" hidden>
+                        <li data-rule="ulen">Between 8 and 20 characters</li>
+                    </ul>
+                </label>
+                <label class="auth-field">
+                    <span>Password</span>
+                    <input type="password" id="authPass" autocomplete="current-password" required>
+                    <ul class="req-list" id="passReqs" hidden>
+                        <li data-rule="plen">At least 8 characters</li>
+                        <li data-rule="upper">One uppercase letter (A&ndash;Z)</li>
+                        <li data-rule="lower">One lowercase letter (a&ndash;z)</li>
+                        <li data-rule="digit">One number (0&ndash;9)</li>
+                        <li data-rule="special">One special character (e.g. ! @ # $ %)</li>
+                    </ul>
+                </label>
+                <label class="auth-field" id="authConfirmField" hidden>
+                    <span>Re-enter Password</span>
+                    <input type="password" id="authConfirm" autocomplete="new-password">
+                </label>
+                <p class="auth-error" id="authError" hidden></p>
+                <button type="submit" class="auth-btn" id="authBtn">Sign In</button>
+            </form>
+
+            <p class="auth-toggle">
+                <span id="authTogglePrompt">New to Dot &amp; Key?</span>
+                <a href="#" id="authToggle">Create an account</a>
+            </p>
+        </div>
+    </section>
+
+    <script src="script.js?v=18"></script>
+</body>
+</html>

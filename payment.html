@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>try{if(!localStorage.getItem("dk_current_user"))location.replace("login.html");}catch(e){}</script>
+    <title>Payment - Dot & Key</title>
+    <link rel="stylesheet" href="style.css?v=18">
+</head>
+<body class="pay-page">
+
+    <header class="navbar">
+        <a href="index.html" class="logo"><img src="images/logo.png" alt="Dot &amp; Key"></a>
+    </header>
+
+    <section class="pay-screen">
+        <div class="pay-card">
+            <p class="pay-method-label" id="payMethodLabel">Prepaid payment</p>
+            <p class="pay-amount">₹<span id="payAmount">0.00</span></p>
+            <p class="pay-hint">Enter your secure 4-digit PIN to confirm this payment</p>
+
+            <form id="pinForm" class="pin-form">
+                <div class="pin-boxes">
+                    <input type="password" inputmode="numeric" maxlength="1" class="pin-box" aria-label="PIN digit 1">
+                    <input type="password" inputmode="numeric" maxlength="1" class="pin-box" aria-label="PIN digit 2">
+                    <input type="password" inputmode="numeric" maxlength="1" class="pin-box" aria-label="PIN digit 3">
+                    <input type="password" inputmode="numeric" maxlength="1" class="pin-box" aria-label="PIN digit 4">
+                </div>
+                <p class="pin-error" id="pinError" hidden>Please enter all 4 digits of your PIN</p>
+                <button type="submit" class="pay-confirm-btn">Pay ₹<span id="payAmount2">0.00</span></button>
+            </form>
+            <a href="cart.html" class="pay-cancel">Cancel and go back</a>
+        </div>
+    </section>
+
+    <div class="order-success" id="orderSuccess" hidden>
+        <div class="order-success-card">
+            <svg class="tick" viewBox="0 0 52 52" aria-hidden="true">
+                <circle class="tick-circle" cx="26" cy="26" r="24"/>
+                <path class="tick-check" d="M14 27l8 8 16-16"/>
+            </svg>
+            <h2>Order Placed!</h2>
+            <p>Your payment was successful and your order is confirmed.</p>
+            <a href="shop.html" class="pay-confirm-btn">Continue Shopping</a>
+        </div>
+    </div>
+
+    <script src="script.js?v=18"></script>
+</body>
+</html>
