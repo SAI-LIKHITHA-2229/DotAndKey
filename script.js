@@ -757,34 +757,48 @@ function setupCheckout(total, cartItems) {
         const subLabel = (sel && !sel.hidden && sel.value) ? sel.value : "";
         const methodText = m.title + (subLabel ? " · " + subLabel : "");
 
-        // Order = the paid cart items + any free gifts (₹0).
+                // Order = the paid cart items + any free gifts (₹0).
         const orderItems = (cartItems || []).concat(giftOrderItems());
 
-        // Snapshot the exact items being ordered so the order is recorded
-        // reliably, independent of the backend being reachable later.
-        try {
-            localStorage.setItem("dk_pending_order", JSON.stringify({
-                items: orderItems,
-                amount: m.price,
-                method: methodText
-            }));
-        } catch (e) { /* storage unavailable */ }
+        // Everything that actually places the order now lives here, so it can
+        // be run only *after* the delivery address has been confirmed.
+        function finishOrder(address) {
+            // Snapshot the exact items being ordered so the order is recorded
+            // reliably, independent of the backend being reachable later.
+            try {
+                localStorage.setItem("dk_pending_order", JSON.stringify({
+                    items: orderItems,
+                    amount: m.price,
+                    method: methodText,
+                    address: address
+                }));
+            } catch (e) { /* storage unavailable */ }
 
-        if (m.id === "cod") {
-            saveOrder(orderItems, m.price, methodText);
-            (cartItems || []).forEach(function(it) {
-                fetch("http://127.0.0.1:5001/cart/" + it.id, { method: "DELETE" }).catch(function() {});
-            });
-            try { localStorage.removeItem("dk_pending_order"); } catch (e) {}
-            payBtn.disabled = true;
-            const success = document.querySelector("#orderSuccess");
-            if (success) success.hidden = false;   // "Order Placed!" popup
-            return;
+            if (m.id === "cod") {
+                saveOrder(orderItems, m.price, methodText, address);
+                (cartItems || []).forEach(function(it) {
+                    fetch("http://127.0.0.1:5001/cart/" + it.id, { method: "DELETE" }).catch(function() {});
+                });
+                try { localStorage.removeItem("dk_pending_order"); } catch (e) {}
+                payBtn.disabled = true;
+                const success = document.querySelector("#orderSuccess");
+                if (success) success.hidden = false;   // "Order Placed!" popup
+                return;
+            }
+
+            // Prepaid: go to the PIN payment page with the amount + chosen method.
+            window.location.href = "payment.html?amount=" + encodeURIComponent(m.price) +
+                "&method=" + encodeURIComponent(methodText);
         }
 
-        // Prepaid: go to the PIN payment page with the amount + chosen method.
-        window.location.href = "payment.html?amount=" + encodeURIComponent(m.price) +
-            "&method=" + encodeURIComponent(methodText);
+        // Address step: ask for an address the first time, then always show a
+        // confirmation. If the user cancels, finishOrder never runs and the
+        // cart is left exactly as it was.
+        if (window.DKAddress) {
+            DKAddress.requireAddress(finishOrder);
+        } else {
+            finishOrder(null);   // address.js missing — behave exactly as before
+        }
     });
 
     checkoutBtn.addEventListener("click", function() {
@@ -840,6 +854,7 @@ if (pinForm) {
     });
 }
 
+
 function placeOrderAndShowSuccess() {
     const success = document.querySelector("#orderSuccess");
     if (success) success.hidden = false;     // CSS animates it in on display change
@@ -848,6 +863,7 @@ function placeOrderAndShowSuccess() {
     let amount = params.get("amount") || "0.00";
     let method = params.get("method") || "Prepaid payment";
     let items = [];
+    let address = null;
 
     // Prefer the snapshot taken on the cart page (reliable even if the
     // backend is down); fall back to the URL params.
@@ -857,10 +873,14 @@ function placeOrderAndShowSuccess() {
             if (Array.isArray(pending.items)) items = pending.items;
             if (pending.amount) amount = pending.amount;
             if (pending.method) method = pending.method;
+            if (pending.address) address = pending.address;
         }
     } catch (e) { /* ignore */ }
 
-    saveOrder(items, amount, method);
+    // Fall back to the user's currently saved address if the snapshot had none.
+    if (!address && window.DKAddress) address = DKAddress.get();
+
+    saveOrder(items, amount, method, address);
     try { localStorage.removeItem("dk_pending_order"); } catch (e) {}
 
     // Best-effort: empty the server-side cart.
@@ -872,7 +892,8 @@ function placeOrderAndShowSuccess() {
 }
 
 // Persist a placed order to localStorage so the Account page can list it.
-function saveOrder(items, amount, method) {
+// `address` is optional, so older saved orders (which have none) still work.
+function saveOrder(items, amount, method, address) {
     try {
         const orders = JSON.parse(localStorage.getItem("dk_orders") || "[]");
         orders.push({
@@ -880,6 +901,9 @@ function saveOrder(items, amount, method) {
             date: new Date().toISOString(),
             amount: amount,
             method: method,
+            address: address || null,
+
+
             items: (items || []).map(function(it) {
                 return { name: it.product_name, price: it.price, qty: it.quantity, image: it.image };
             })
@@ -1109,10 +1133,16 @@ if (ordersList && !localStorage.getItem("dk_current_user")) {
                         '</div>';
                     }).join("") : '<div class="order-item"><span class="order-item-name">Items not recorded for this order</span></div>') +
                 '</div>' +
-                '<div class="order-foot">' +
+                                '<div class="order-foot">' +
                     '<span>Paid via ' + o.method + '</span>' +
                     '<span class="order-total">Total &#8377;' + o.amount + '</span>' +
-                '</div>';
+                '</div>' +
+                // Older orders saved before this feature have no address.
+                (o.address && window.DKAddress
+                    ? '<p class="order-address"><strong>Delivered to:</strong> ' +
+                          o.address.fullName + ' — ' + DKAddress.format(o.address) +
+                      '</p>'
+                    : '');
             ordersList.appendChild(card);
         });
     }

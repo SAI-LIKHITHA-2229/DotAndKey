@@ -6,6 +6,7 @@
     <script>try{if(!localStorage.getItem("dk_current_user"))location.replace("login.html");}catch(e){}</script>
     <title>My Account - Dot & Key</title>
     <link rel="stylesheet" href="style.css?v=18">
+    <link rel="stylesheet" href="address.css?v=1">
 </head>
 <body class="account-page">
 
@@ -31,6 +32,11 @@
         </nav>
     </header>
 
+        <section class="account-section address-section">
+        <h2>Delivery Address</h2>
+        <div id="savedAddressBox"></div>
+    </section>
+
     <section class="account-section">
         <div class="account-top">
             <h2>My Orders</h2>
@@ -45,6 +51,7 @@
         </p>
     </section>
 
+    <script src="address.js?v=1"></script>
     <script src="script.js?v=18"></script>
 </body>
 </html>
