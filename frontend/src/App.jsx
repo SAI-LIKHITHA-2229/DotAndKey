@@ -1,18 +1,14 @@
-import { products } from './data/products'
-import ProductCard from './components/ProductCard'
+import { Routes, Route } from 'react-router-dom'
+import Home from './pages/Home'
+import Shop from './pages/Shop'
 
 function App() {
   return (
-    <div>
-      <h1>Dot & Key</h1>
-      <div className="product-grid">
-        {products.map((product) => (
-          <ProductCard key={product.id} product={product} />
-        ))}
-      </div>
-    </div>
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/shop" element={<Shop />} />
+    </Routes>
   )
 }
 
 export default App
-
