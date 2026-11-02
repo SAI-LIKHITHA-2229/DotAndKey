@@ -1,9 +1,19 @@
 const API_URL = import.meta.env.VITE_API_URL
 
-export async function addToCart(product, variant, image) {
+async function request(path, options) {
+  const response = await fetch(`${API_URL}${path}`, options)
+
+  if (!response.ok) {
+    throw new Error(`Request to ${path} failed: HTTP ${response.status}`)
+  }
+
+  return response.json()
+}
+
+export function addToCart(product, variant, image) {
   const name = variant ? `${product.name} (${variant})` : product.name
 
-  const response = await fetch(`${API_URL}/cart`, {
+  return request('/cart', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -12,10 +22,20 @@ export async function addToCart(product, variant, image) {
       image: image || product.image,
     }),
   })
+}
 
-  if (!response.ok) {
-    throw new Error(`Add to cart failed: HTTP ${response.status}`)
-  }
+export function getCart() {
+  return request('/cart')
+}
 
-  return response.json()
+export function increaseItem(id) {
+  return request(`/cart/${id}/increase`, { method: 'PUT' })
+}
+
+export function decreaseItem(id) {
+  return request(`/cart/${id}/decrease`, { method: 'PUT' })
+}
+
+export function removeItem(id) {
+  return request(`/cart/${id}`, { method: 'DELETE' })
 }
