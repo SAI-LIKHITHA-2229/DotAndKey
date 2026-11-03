@@ -44,7 +44,12 @@ export async function request(path, options = {}) {
   }
 
   const response = await fetch(`${API_URL}${path}`, { ...options, headers })
-  const data = await response.json().catch(() => ({}))
+    const data = await response.json().catch(() => ({}))
+
+  if (response.status === 401 && token) {
+    clearSession()
+    window.dispatchEvent(new Event('auth:expired'))
+  }
 
   if (!response.ok) {
     const error = new Error(data.error || `Request failed (HTTP ${response.status})`)

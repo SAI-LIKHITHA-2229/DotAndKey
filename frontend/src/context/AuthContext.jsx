@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { loginUser, registerUser } from '../api/auth'
 import {
   clearSession,
@@ -13,6 +13,14 @@ export function AuthProvider({ children }) {
   const [username, setUsername] = useState(() =>
     getToken() ? getStoredUsername() : null
   )
+
+    useEffect(() => {
+    function handleExpired() {
+      setUsername(null)
+    }
+    window.addEventListener('auth:expired', handleExpired)
+    return () => window.removeEventListener('auth:expired', handleExpired)
+  }, [])
 
   async function login(name, password) {
     const data = await loginUser(name, password)

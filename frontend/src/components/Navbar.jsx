@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 
 const navItems = [
   {
@@ -46,34 +47,52 @@ const navItems = [
 ]
 
 function Navbar() {
+  const { isLoggedIn, logout } = useAuth()
+  const navigate = useNavigate()
+
+  function handleLogout() {
+    logout()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <header className="navbar">
       <Link to="/" className="logo">
         <img src="/images/logo.png" alt="Dot & Key" />
       </Link>
-      <nav className="nav-links">
-        {navItems.map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            className="nav-link"
-            aria-label={item.label}
-          >
-            <svg
-              className="nav-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+
+      {isLoggedIn && (
+        <nav className="nav-links">
+          {navItems.map((item) => (
+            <Link
+              key={item.to}
+              to={item.to}
+              className="nav-link"
+              aria-label={item.label}
             >
-              {item.icon}
-            </svg>
-            <span>{item.label}</span>
-          </Link>
-        ))}
-      </nav>
+              <svg
+                className="nav-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                {item.icon}
+              </svg>
+              <span>{item.label}</span>
+            </Link>
+          ))}
+          <button
+            type="button"
+            className="logout-btn nav-logout"
+            onClick={handleLogout}
+          >
+            Log out
+          </button>
+        </nav>
+      )}
     </header>
   )
 }
