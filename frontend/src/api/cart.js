@@ -1,14 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL
-
-async function request(path, options) {
-  const response = await fetch(`${API_URL}${path}`, options)
-
-  if (!response.ok) {
-    throw new Error(`Request to ${path} failed: HTTP ${response.status}`)
-  }
-
-  return response.json()
-}
+import { request } from './client'
 
 export function addToCart(product, variant, image) {
   const name = variant ? `${product.name} (${variant})` : product.name
