@@ -1,17 +1,19 @@
-from contextlib import closing
-import os
 import datetime
-import jwt
-
-from flask import Flask, jsonify, request
-from flask_cors import CORS
+import os
 import sqlite3
-from werkzeug.security import generate_password_hash, check_password_hash
+from contextlib import closing
+from functools import wraps
+
+import jwt
+from flask import Flask, g, jsonify, request
+from flask_cors import CORS
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 CORS(app)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-change-me")
+
 
 def get_db_connection():
     # timeout / busy_timeout: wait for a lock instead of failing or hanging.
@@ -19,6 +21,7 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
+
 
 def init_db():
     with closing(get_db_connection()) as conn:
@@ -42,20 +45,47 @@ def init_db():
             )
         """)
 
-        # Migrate older databases created before the "image" column existed.
+        # Migrate older databases created before these columns existed.
         columns = [row["name"] for row in conn.execute("PRAGMA table_info(cart)")]
         if "image" not in columns:
             conn.execute("ALTER TABLE cart ADD COLUMN image TEXT")
+        if "user_id" not in columns:
+            conn.execute("ALTER TABLE cart ADD COLUMN user_id INTEGER")
 
         conn.commit()
 
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return jsonify({"error": "Login required"}), 401
+
+        token = header[len("Bearer "):]
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid or expired token"}), 401
+
+        g.user_id = payload["user_id"]
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
 @app.route("/cart")
+@login_required
 def get_cart():
     with closing(get_db_connection()) as conn:
-        items = conn.execute("SELECT * FROM cart").fetchall()
+        items = conn.execute(
+            "SELECT * FROM cart WHERE user_id = ?", (g.user_id,)
+        ).fetchall()
     return jsonify([dict(item) for item in items])
 
+
 @app.route("/cart", methods=["POST"])
+@login_required
 def add_to_cart():
     new_item = request.get_json(silent=True) or {}
     if not new_item.get("product_name"):
@@ -63,8 +93,8 @@ def add_to_cart():
 
     with closing(get_db_connection()) as conn:
         existing = conn.execute(
-            "SELECT id FROM cart WHERE product_name = ?",
-            (new_item["product_name"],)
+            "SELECT id FROM cart WHERE product_name = ? AND user_id = ?",
+            (new_item["product_name"], g.user_id)
         ).fetchone()
 
         if existing:
@@ -74,25 +104,34 @@ def add_to_cart():
             )
         else:
             conn.execute(
-                "INSERT INTO cart (product_name, price, quantity, image) VALUES (?, ?, ?, ?)",
-                (new_item["product_name"], new_item.get("price", 0), 1, new_item.get("image"))
+                "INSERT INTO cart (product_name, price, quantity, image, user_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (new_item["product_name"], new_item.get("price", 0), 1,
+                 new_item.get("image"), g.user_id)
             )
         conn.commit()
 
     return jsonify({"message": "Item added to cart"}), 201
 
+
 @app.route("/cart/<int:item_id>", methods=["DELETE"])
+@login_required
 def remove_from_cart(item_id):
     with closing(get_db_connection()) as conn:
-        conn.execute("DELETE FROM cart WHERE id = ?", (item_id,))
+        conn.execute(
+            "DELETE FROM cart WHERE id = ? AND user_id = ?", (item_id, g.user_id)
+        )
         conn.commit()
     return jsonify({"message": "Item removed from cart"}), 200
 
+
 @app.route("/cart/<int:item_id>/decrease", methods=["PUT"])
+@login_required
 def decrease_quantity(item_id):
     with closing(get_db_connection()) as conn:
         item = conn.execute(
-            "SELECT quantity FROM cart WHERE id = ?", (item_id,)
+            "SELECT quantity FROM cart WHERE id = ? AND user_id = ?",
+            (item_id, g.user_id)
         ).fetchone()
 
         if item is None:
@@ -108,14 +147,18 @@ def decrease_quantity(item_id):
 
     return jsonify({"message": "Quantity updated"}), 200
 
+
 @app.route("/cart/<int:item_id>/increase", methods=["PUT"])
+@login_required
 def increase_quantity(item_id):
     with closing(get_db_connection()) as conn:
         conn.execute(
-            "UPDATE cart SET quantity = quantity + 1 WHERE id = ?", (item_id,)
+            "UPDATE cart SET quantity = quantity + 1 WHERE id = ? AND user_id = ?",
+            (item_id, g.user_id)
         )
         conn.commit()
     return jsonify({"message": "Quantity updated"}), 200
+
 
 @app.route("/register", methods=["POST"])
 def register():
@@ -141,6 +184,7 @@ def register():
         return jsonify({"error": "Username already taken"}), 409
 
     return jsonify({"message": "Account created"}), 201
+
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -168,7 +212,6 @@ def login():
 
 
 if __name__ == "__main__":
-    
     init_db()
     # threaded=True   -> handle requests concurrently.
     # use_reloader=False -> the auto-reloader restarts the app on every file
