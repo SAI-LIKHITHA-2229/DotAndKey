@@ -1,11 +1,17 @@
 from contextlib import closing
+import os
+import datetime
+import jwt
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import sqlite3
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 CORS(app)
+
+SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
 def get_db_connection():
     # timeout / busy_timeout: wait for a lock instead of failing or hanging.
@@ -26,6 +32,13 @@ def init_db():
                 price INTEGER NOT NULL,
                 quantity INTEGER NOT NULL DEFAULT 1,
                 image TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT NOT NULL
             )
         """)
 
@@ -104,7 +117,58 @@ def increase_quantity(item_id):
         conn.commit()
     return jsonify({"message": "Quantity updated"}), 200
 
+@app.route("/register", methods=["POST"])
+def register():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+
+    if len(username) < 3:
+        return jsonify({"error": "Username must be at least 3 characters"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+
+    password_hash = generate_password_hash(password)
+
+    try:
+        with closing(get_db_connection()) as conn:
+            conn.execute(
+                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                (username, password_hash)
+            )
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Username already taken"}), 409
+
+    return jsonify({"message": "Account created"}), 201
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+
+    with closing(get_db_connection()) as conn:
+        user = conn.execute(
+            "SELECT id, username, password_hash FROM users WHERE username = ?",
+            (username,)
+        ).fetchone()
+
+    if user is None or not check_password_hash(user["password_hash"], password):
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=12)
+    token = jwt.encode(
+        {"user_id": user["id"], "username": user["username"], "exp": expires},
+        SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    return jsonify({"token": token, "username": user["username"]}), 200
+
+
 if __name__ == "__main__":
+    
     init_db()
     # threaded=True   -> handle requests concurrently.
     # use_reloader=False -> the auto-reloader restarts the app on every file
