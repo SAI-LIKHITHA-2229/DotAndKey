@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import sqlite3
 from contextlib import closing
@@ -13,6 +14,7 @@ app = Flask(__name__)
 CORS(app)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-change-me")
+DISCOUNT_PERCENT = 20
 
 
 def get_db_connection():
@@ -42,6 +44,17 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 password_hash TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                items TEXT NOT NULL,
+                total INTEGER NOT NULL,
+                address TEXT,
+                payment_method TEXT,
+                created_at TEXT NOT NULL
             )
         """)
 
@@ -158,6 +171,61 @@ def increase_quantity(item_id):
         )
         conn.commit()
     return jsonify({"message": "Quantity updated"}), 200
+
+
+@app.route("/orders", methods=["POST"])
+@login_required
+def place_order():
+    data = request.get_json(silent=True) or {}
+    address = (data.get("address") or "").strip()
+    payment_method = (data.get("payment_method") or "").strip()
+
+    if not address:
+        return jsonify({"error": "Address is required"}), 400
+    if not payment_method:
+        return jsonify({"error": "Payment method is required"}), 400
+
+    with closing(get_db_connection()) as conn:
+        rows = conn.execute(
+            "SELECT product_name, price, quantity, image FROM cart WHERE user_id = ?",
+            (g.user_id,)
+        ).fetchall()
+
+        if not rows:
+            return jsonify({"error": "Your cart is empty"}), 400
+
+        items = [dict(row) for row in rows]
+        subtotal = sum(item["price"] * item["quantity"] for item in items)
+        discount = int(subtotal * DISCOUNT_PERCENT / 100 + 0.5)
+        total = subtotal - discount
+        created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        cursor = conn.execute(
+            "INSERT INTO orders (user_id, items, total, address, payment_method, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (g.user_id, json.dumps(items), total, address, payment_method, created_at)
+        )
+        conn.execute("DELETE FROM cart WHERE user_id = ?", (g.user_id,))
+        conn.commit()
+        order_id = cursor.lastrowid
+
+    return jsonify({"message": "Order placed", "order_id": order_id, "total": total}), 201
+
+
+@app.route("/orders")
+@login_required
+def list_orders():
+    with closing(get_db_connection()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM orders WHERE user_id = ? ORDER BY id DESC", (g.user_id,)
+        ).fetchall()
+
+    orders = []
+    for row in rows:
+        order = dict(row)
+        order["items"] = json.loads(order["items"])
+        orders.append(order)
+    return jsonify(orders)
 
 
 @app.route("/register", methods=["POST"])

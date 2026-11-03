@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react'
-import { getCart, increaseItem, decreaseItem, removeItem } from '../api/cart'
+import {
+  getCart,
+  increaseItem,
+  decreaseItem,
+  removeItem,
+  placeOrder,
+} from '../api/cart'
 
 const DISCOUNT_PERCENT = 20
+const PAYMENT_METHODS = ['Cash on Delivery', 'UPI', 'Credit / Debit Card']
 
 function Cart() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [address, setAddress] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0])
+  const [placing, setPlacing] = useState(false)
+  const [orderMessage, setOrderMessage] = useState('')
 
   async function loadCart() {
     try {
@@ -35,6 +46,24 @@ function Cart() {
     }
   }
 
+  async function handlePlaceOrder(event) {
+    event.preventDefault()
+    setError('')
+    setPlacing(true)
+    try {
+      const result = await placeOrder(address.trim(), paymentMethod)
+      setOrderMessage(
+        `Order #${result.order_id} placed! Total: ₹${result.total} 🎉`
+      )
+      setAddress('')
+      await loadCart()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setPlacing(false)
+    }
+  }
+
   const subtotal = items.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0
@@ -53,7 +82,8 @@ function Cart() {
   return (
     <section className="cart-section">
       <h2>Your Cart</h2>
-      {error && <p>{error}</p>}
+      {orderMessage && <p className="cart-empty-msg">{orderMessage}</p>}
+      {error && <p className="auth-error">{error}</p>}
 
       {items.length === 0 ? (
         <p>Your cart is empty.</p>
@@ -105,6 +135,37 @@ function Cart() {
               <span>₹{total}</span>
             </span>
           </p>
+
+          <form onSubmit={handlePlaceOrder}>
+            <label className="auth-field">
+              <span>Delivery address</span>
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="House no, street, city, PIN"
+                required
+              />
+            </label>
+
+            <label className="auth-field">
+              <span>Payment method</span>
+              <select
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              >
+                {PAYMENT_METHODS.map((method) => (
+                  <option key={method} value={method}>
+                    {method}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button type="submit" className="checkout-btn" disabled={placing}>
+              {placing ? 'Placing order...' : `Place order • ₹${total}`}
+            </button>
+          </form>
         </>
       )}
     </section>

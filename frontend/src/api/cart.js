@@ -29,3 +29,15 @@ export function decreaseItem(id) {
 export function removeItem(id) {
   return request(`/cart/${id}`, { method: 'DELETE' })
 }
+
+export function placeOrder(address, paymentMethod) {
+  return request('/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, payment_method: paymentMethod }),
+  })
+}
+
+export function getOrders() {
+  return request('/orders')
+}
