@@ -14,7 +14,36 @@ app = Flask(__name__)
 CORS(app)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-change-me")
-DISCOUNT_PERCENT = 20
+
+# ---- Pricing rules (the server is the only place these are decided) ----
+DISCOUNT_PERCENT = 20          # store-wide discount
+PREPAID_EXTRA_PERCENT = 5      # extra off for card / wallet / netbanking
+FREE_SHIPPING_MIN = 1000       # bill needed for free shipping
+FREE_GIFT_STEP = 1000          # one free gift per this much
+
+FREE_GIFTS = [
+    {"name": "Vitamin C Facewash - 15ml", "image": "gift-vitc-facewash.jpg"},
+    {"name": "72HR Hydrating Gel Moisturizer - 15ml", "image": "gift-72hr-moisturizer.jpg"},
+    {"name": "Barrier Repair Moisturizer - 15ml", "image": "gift-barrier-repair.jpg"},
+    {"name": "Strawberry Moisturizer - 15ml", "image": "gift-strawberry-moisturizer.jpg"},
+    {"name": "CICA + Niacinamide Oil Free Moisturizer - 15ml", "image": "gift-cica-niacinamide.jpg"},
+]
+
+PAYMENT_METHODS = [
+    {"id": "cod", "title": "Cash on delivery", "sub": "Pay with cash",
+     "prepaid": False, "options": []},
+    {"id": "card", "title": "Debit/Credit cards", "sub": "Visa, Mastercard, RuPay & more",
+     "prepaid": True, "options": ["Visa", "Mastercard", "RuPay", "American Express"]},
+    {"id": "wallet", "title": "Wallets", "sub": "Amazon Pay, PhonePe, Mobikwik & more",
+     "prepaid": True, "options": ["Amazon Pay", "PhonePe", "Mobikwik"]},
+    {"id": "netbanking", "title": "Netbanking", "sub": "Select from a list of banks",
+     "prepaid": True,
+     "options": ["HDFC Bank", "ICICI Bank", "State Bank of India", "Axis Bank",
+                 "Kotak Mahindra Bank", "Punjab National Bank", "Bank of Baroda",
+                 "Yes Bank"]},
+    {"id": "paylater", "title": "Pay Later", "sub": "LazyPay, Simpl & more",
+     "prepaid": False, "options": ["LazyPay", "Simpl", "ICICI PayLater"]},
+]
 
 
 def get_db_connection():
@@ -87,6 +116,42 @@ def login_required(view):
     return wrapped
 
 
+# ---- Pricing helpers ----
+def percent_of(amount, percent):
+    return int(amount * percent / 100 + 0.5)
+
+
+def get_cart_rows(conn, user_id):
+    rows = conn.execute(
+        "SELECT product_name, price, quantity, image FROM cart WHERE user_id = ?",
+        (user_id,)
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def price_cart(items):
+    subtotal = sum(item["price"] * item["quantity"] for item in items)
+    discount = percent_of(subtotal, DISCOUNT_PERCENT)
+    return subtotal, discount, subtotal - discount
+
+
+def max_gifts_for(bill_total):
+    return min(bill_total // FREE_GIFT_STEP, len(FREE_GIFTS))
+
+
+def method_total(bill_total, method):
+    off = percent_of(bill_total, PREPAID_EXTRA_PERCENT) if method["prepaid"] else 0
+    return off, bill_total - off
+
+
+def find_method(method_id):
+    for method in PAYMENT_METHODS:
+        if method["id"] == method_id:
+            return method
+    return None
+
+
+# ---- Cart ----
 @app.route("/cart")
 @login_required
 def get_cart():
@@ -173,37 +238,97 @@ def increase_quantity(item_id):
     return jsonify({"message": "Quantity updated"}), 200
 
 
+# ---- Checkout ----
+@app.route("/checkout/summary")
+@login_required
+def checkout_summary():
+    with closing(get_db_connection()) as conn:
+        items = get_cart_rows(conn, g.user_id)
+
+    subtotal, discount, bill_total = price_cart(items)
+    max_gifts = max_gifts_for(bill_total)
+
+    methods = []
+    for method in PAYMENT_METHODS:
+        off, total = method_total(bill_total, method)
+        methods.append({**method, "discount": off, "total": total})
+
+    return jsonify({
+        "subtotal": subtotal,
+        "discount": discount,
+        "discount_percent": DISCOUNT_PERCENT,
+        "bill_total": bill_total,
+        "free_shipping": bill_total >= FREE_SHIPPING_MIN,
+        "free_shipping_remaining": max(0, FREE_SHIPPING_MIN - bill_total),
+        "prepaid_percent": PREPAID_EXTRA_PERCENT,
+        "gifts": {
+            "available": FREE_GIFTS,
+            "max": max_gifts,
+            "all_unlocked": max_gifts >= len(FREE_GIFTS),
+            "next_unlock_in": FREE_GIFT_STEP - (bill_total % FREE_GIFT_STEP),
+        },
+        "methods": methods,
+    })
+
+
 @app.route("/orders", methods=["POST"])
 @login_required
 def place_order():
     data = request.get_json(silent=True) or {}
     address = (data.get("address") or "").strip()
-    payment_method = (data.get("payment_method") or "").strip()
+    method = find_method(data.get("payment_method"))
+    option = (data.get("payment_option") or "").strip()
+    chosen_gifts = data.get("gifts") or []
 
     if not address:
         return jsonify({"error": "Address is required"}), 400
-    if not payment_method:
-        return jsonify({"error": "Payment method is required"}), 400
+    if method is None:
+        return jsonify({"error": "Choose a payment method"}), 400
+    if method["options"] and option not in method["options"]:
+        return jsonify({"error": "Choose an option for this payment method"}), 400
 
     with closing(get_db_connection()) as conn:
-        rows = conn.execute(
-            "SELECT product_name, price, quantity, image FROM cart WHERE user_id = ?",
-            (g.user_id,)
-        ).fetchall()
-
-        if not rows:
+        items = get_cart_rows(conn, g.user_id)
+        if not items:
             return jsonify({"error": "Your cart is empty"}), 400
 
-        items = [dict(row) for row in rows]
-        subtotal = sum(item["price"] * item["quantity"] for item in items)
-        discount = int(subtotal * DISCOUNT_PERCENT / 100 + 0.5)
-        total = subtotal - discount
+        subtotal, discount, bill_total = price_cart(items)
+        max_gifts = max_gifts_for(bill_total)
+
+        if max_gifts >= len(FREE_GIFTS):
+            gifts = list(FREE_GIFTS)
+        else:
+            gift_lookup = {gift["name"]: gift for gift in FREE_GIFTS}
+            valid = (
+                isinstance(chosen_gifts, list)
+                and all(isinstance(name, str) for name in chosen_gifts)
+                and len(set(chosen_gifts)) == len(chosen_gifts)
+                and len(chosen_gifts) <= max_gifts
+                and all(name in gift_lookup for name in chosen_gifts)
+            )
+            if not valid:
+                return jsonify({"error": "Invalid free gift selection"}), 400
+            gifts = [gift_lookup[name] for name in chosen_gifts]
+
+        gift_items = [
+            {
+                "product_name": f"{gift['name']} (Free gift)",
+                "price": 0,
+                "quantity": 1,
+                "image": gift["image"],
+            }
+            for gift in gifts
+        ]
+
+        _, total = method_total(bill_total, method)
+        payment_text = method["title"] + (f" · {option}" if option else "")
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         cursor = conn.execute(
             "INSERT INTO orders (user_id, items, total, address, payment_method, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (g.user_id, json.dumps(items), total, address, payment_method, created_at)
+            (g.user_id, json.dumps(items + gift_items), total, address,
+             payment_text, created_at)
         )
         conn.execute("DELETE FROM cart WHERE user_id = ?", (g.user_id,))
         conn.commit()
@@ -228,6 +353,7 @@ def list_orders():
     return jsonify(orders)
 
 
+# ---- Accounts ----
 @app.route("/register", methods=["POST"])
 def register():
     data = request.get_json(silent=True) or {}
