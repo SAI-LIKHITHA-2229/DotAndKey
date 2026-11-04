@@ -19,27 +19,45 @@ function Cart() {
   const [placing, setPlacing] = useState(false)
   const [orderMessage, setOrderMessage] = useState('')
 
-  async function loadCart() {
-    try {
-      const data = await getCart()
-      setItems(data)
-      setError('')
-    } catch (err) {
-      console.error(err)
-      setError("Couldn't load your cart. Is the server running?")
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    loadCart()
+    let ignore = false
+
+    async function fetchCart() {
+      try {
+        const data = await getCart()
+        if (!ignore) {
+          setItems(data)
+          setError('')
+        }
+      } catch (err) {
+        console.error(err)
+        if (!ignore) {
+          setError("Couldn't load your cart. Is the server running?")
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false)
+        }
+      }
+    }
+
+    fetchCart()
+
+    return () => {
+      ignore = true
+    }
   }, [])
+
+  async function refreshCart() {
+    const data = await getCart()
+    setItems(data)
+  }
 
   async function changeItem(action, id) {
     try {
       await action(id)
-      await loadCart()
+      await refreshCart()
+      setError('')
     } catch (err) {
       console.error(err)
       setError('Something went wrong. Please try again.')
@@ -56,7 +74,7 @@ function Cart() {
         `Order #${result.order_id} placed! Total: ₹${result.total} 🎉`
       )
       setAddress('')
-      await loadCart()
+      await refreshCart()
     } catch (err) {
       setError(err.message)
     } finally {
