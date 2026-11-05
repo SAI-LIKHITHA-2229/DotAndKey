@@ -107,9 +107,9 @@ function Login() {
 
         <p className="auth-toggle">
           <span>{isSignup ? 'Already have an account?' : 'New to Dot & Key?'}</span>{' '}
-          <a href="#" onClick={switchMode}>
+          <button type="button" className="link-btn" onClick={switchMode}>
             {isSignup ? 'Sign in' : 'Create an account'}
-          </a>
+          </button>
         </p>
       </div>
     </section>

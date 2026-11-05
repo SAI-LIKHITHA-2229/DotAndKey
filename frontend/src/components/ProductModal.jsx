@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useAddToCart } from '../hooks/useAddToCart'
@@ -20,9 +20,36 @@ function ProductModal({ product, initialIndex, onClose }) {
   const image = selected?.image || product.image
   const shownImage = variants[previewIndex]?.image || image
 
+  const titleId = useId()
+  const dialogRef = useRef(null)
+  const closeRef = useRef(null)
+
+  // Move focus into the dialog, and give it back to whatever opened it.
+  useEffect(() => {
+    const opener = document.activeElement
+    closeRef.current?.focus()
+    return () => opener?.focus?.()
+  }, [])
+
+  // Esc closes; Tab and Shift+Tab stay inside the dialog.
   useEffect(() => {
     function handleKey(event) {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+
+      const focusable = dialogRef.current.querySelectorAll('button:not([disabled])')
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
@@ -30,15 +57,23 @@ function ProductModal({ product, initialIndex, onClose }) {
 
   return createPortal(
     <div className="modal-overlay active" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <span
+      <div
+        ref={dialogRef}
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          ref={closeRef}
+          type="button"
           className="close-btn"
-          role="button"
           aria-label="Close"
           onClick={onClose}
         >
           &times;
-        </span>
+        </button>
 
         <img
           src={`/images/${shownImage}`}
@@ -50,7 +85,7 @@ function ProductModal({ product, initialIndex, onClose }) {
         />
 
         <div className="modal-details">
-          <h2>{product.name}</h2>
+          <h2 id={titleId}>{product.name}</h2>
           <p>₹{product.price}</p>
 
           <VariantPicker

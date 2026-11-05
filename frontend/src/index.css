@@ -996,10 +996,18 @@ body.auth-page {
     color: #777;
 }
 
-.auth-toggle a {
+.auth-toggle .link-btn {
+    padding: 0;
+    font: inherit;
     color: #d11267;
     font-weight: 600;
-    text-decoration: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.auth-toggle .link-btn:hover {
+    text-decoration: underline;
 }
 
 /* ---- Account / My Orders page ---- */
@@ -1458,11 +1466,38 @@ body.pay-page {
 
 .close-btn {
     position: absolute;
-    top: 12px;
-    right: 16px;
+    top: 8px;
+    right: 10px;
+    padding: 2px 8px;
     font-size: 24px;
+    line-height: 1;
     cursor: pointer;
     color: #333;
+    background: none;
+    border: none;
+    border-radius: 6px;
+}
+
+.product-image-btn {
+    display: block;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+/* Visible focus ring for keyboard users (not shown on mouse clicks). */
+.close-btn:focus-visible,
+.product-image-btn:focus-visible,
+.link-btn:focus-visible,
+.add-to-cart-btn:focus-visible,
+.variant-pill:focus-visible,
+.swatch-dot:focus-visible,
+.nav-link:focus-visible {
+    outline: 3px solid #d11267;
+    outline-offset: 2px;
 }
 
 .product-card {

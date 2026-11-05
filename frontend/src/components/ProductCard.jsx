@@ -23,16 +23,23 @@ function ProductCard({ product }) {
 
   return (
     <div className="product-card">
-      <img
-        src={`/images/${shownImage}`}
-        alt={product.name}
-        className="product-image"
+      {/* A real button, so the details can be opened with the keyboard too. */}
+      <button
+        type="button"
+        className="product-image-btn"
+        aria-label={`View details for ${product.name}`}
         onClick={() => setModalOpen(true)}
-        onError={(e) => {
-          e.currentTarget.onerror = null
-          e.currentTarget.src = `/images/${product.image}`
-        }}
-      />
+      >
+        <img
+          src={`/images/${shownImage}`}
+          alt=""
+          className="product-image"
+          onError={(e) => {
+            e.currentTarget.onerror = null
+            e.currentTarget.src = `/images/${product.image}`
+          }}
+        />
+      </button>
       <h3>{product.name}</h3>
       <p className="price">₹{product.price}</p>
 
