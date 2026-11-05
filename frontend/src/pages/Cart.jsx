@@ -83,7 +83,8 @@ function Cart() {
       applyData(await fetchAll())
     } catch (err) {
       console.error(err)
-      setError('Something went wrong. Please try again.')
+      // e.g. "You can add up to 10 of an item"
+      setError(err.message || 'Something went wrong. Please try again.')
     }
   }
 
@@ -171,7 +172,11 @@ function Cart() {
   return (
     <section className="cart-section">
       <h2>Your Cart</h2>
-      {error && <p>{error}</p>}
+      {error && (
+        <p className="auth-error" role="alert">
+          {error}
+        </p>
+      )}
 
       {items.length === 0 ? (
         <p>Your cart is empty.</p>
