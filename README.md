@@ -149,7 +149,6 @@ frontend/
 
 The original HTML/CSS/JS version of the site is preserved under the Git tag [`legacy-v1`](https://github.com/SAI-LIKHITHA-2229/DotAndKey/tree/legacy-v1/legacy).
 
-## Notes
+## Disclaimer
 
-- The payment step is a **demo**: any 4-digit PIN is accepted and no real payment is taken.
-- Product names and images are used for educational and portfolio purposes only.
+This is an **unofficial portfolio project** built for learning. It is not affiliated with, endorsed by or selling for Dot & Key. Product names, logos and images belong to their respective owners and are used only to make the demo realistic. No real orders are fulfilled, and the payment step is a demo: any 4-digit PIN is accepted and no money is charged. Prepaid orders are recorded with `payment_status = "demo_paid"`.

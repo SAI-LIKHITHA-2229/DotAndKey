@@ -20,6 +20,11 @@ function App() {
         <Route path="/payment" element={<RequireAuth><Payment /></RequireAuth>} />
         <Route path="/account" element={<RequireAuth><Account /></RequireAuth>} />
       </Routes>
+      <footer className="site-footer">
+        Unofficial portfolio project built for learning. Not affiliated with,
+        endorsed by or selling for Dot &amp; Key. Product names and images
+        belong to their owners. No real orders or payments are processed.
+      </footer>
     </>
   )
 }

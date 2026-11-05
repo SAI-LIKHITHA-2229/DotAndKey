@@ -1568,6 +1568,16 @@ body.pay-page {
     border-top: 1px solid #f2e6ec;
 }
 
+.site-footer {
+    max-width: 760px;
+    margin: 40px auto 24px;
+    padding: 0 16px;
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
+    color: #6b5a63;
+}
+
 /* Payment page: makes clear that the PIN step is a demo. */
 .demo-note {
     margin: 12px 0 18px;
