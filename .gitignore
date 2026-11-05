@@ -1,16 +1,54 @@
-# Python
-__pycache__/
-*.pyc
-.pytest_cache/
-.venv/
-venv/
-
-# Local environment files (commit the .env.example templates instead)
+# ---- Secrets / local configuration ----
+# Commit the .env.example templates instead.
 .env
 .env.*
 !.env.example
+*.local
 
-# Runtime database (created by app.py; not source)
-cart.db
-cart.db-wal
-cart.db-shm
+# ---- Databases (created at runtime by backend/app.py; never source) ----
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+instance/
+build/
+*.egg-info/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node / frontend build output ----
+node_modules/
+dist/
+dist-ssr/
+coverage/
+
+# ---- Logs ----
+logs/
+*.log
+
+# ---- Editors and OS files ----
+**/.vscode/*
+!**/.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Tool-local settings ----
+.claude/settings.local.json
