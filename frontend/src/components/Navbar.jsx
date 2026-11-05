@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const navItems = [
@@ -64,9 +64,12 @@ function Navbar() {
       {isLoggedIn && (
         <nav className="nav-links">
           {navItems.map((item) => (
-            <Link
+            // NavLink adds the "active" class when this is the current page.
+            // `end` stops Home ("/") from matching every page.
+            <NavLink
               key={item.to}
               to={item.to}
+              end={item.to === '/'}
               className="nav-link"
               aria-label={item.label}
             >
@@ -82,7 +85,7 @@ function Navbar() {
                 {item.icon}
               </svg>
               <span>{item.label}</span>
-            </Link>
+            </NavLink>
           ))}
           <button
             type="button"

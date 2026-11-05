@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import re
 import sqlite3
 from contextlib import closing
 from functools import wraps
@@ -19,6 +20,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-change-me")
 DISCOUNT_PERCENT = 20          # store-wide discount
 PREPAID_EXTRA_PERCENT = 5      # extra off for card / wallet / netbanking
 FREE_SHIPPING_MIN = 1000       # bill needed for free shipping
+SHIPPING_FEE = 70              # charged when the bill is below FREE_SHIPPING_MIN
 FREE_GIFT_STEP = 1000          # one free gift per this much
 
 FREE_GIFTS = [
@@ -44,6 +46,20 @@ PAYMENT_METHODS = [
     {"id": "paylater", "title": "Pay Later", "sub": "LazyPay, Simpl & more",
      "prepaid": False, "options": ["LazyPay", "Simpl", "ICICI PayLater"]},
 ]
+
+# ---- Address rules ----
+INDIAN_STATES = [
+    "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+    "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+    "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya",
+    "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim",
+    "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand",
+    "West Bengal", "Andaman and Nicobar Islands", "Chandigarh",
+    "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Jammu and Kashmir",
+    "Ladakh", "Lakshadweep", "Puducherry",
+]
+ADDRESS_TYPES = ["Home", "Work", "Other"]
+MAX_ADDRESSES = 10
 
 
 def get_db_connection():
@@ -84,6 +100,21 @@ def init_db():
                 address TEXT,
                 payment_method TEXT,
                 created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS addresses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                full_name TEXT NOT NULL,
+                mobile TEXT NOT NULL,
+                pincode TEXT NOT NULL,
+                flat TEXT NOT NULL,
+                area TEXT NOT NULL,
+                landmark TEXT,
+                city TEXT NOT NULL,
+                state TEXT NOT NULL,
+                type TEXT NOT NULL
             )
         """)
 
@@ -139,9 +170,17 @@ def max_gifts_for(bill_total):
     return min(bill_total // FREE_GIFT_STEP, len(FREE_GIFTS))
 
 
+def shipping_for(bill_total):
+    # An empty cart has nothing to ship.
+    if bill_total == 0 or bill_total >= FREE_SHIPPING_MIN:
+        return 0
+    return SHIPPING_FEE
+
+
 def method_total(bill_total, method):
+    # The prepaid discount applies to the products only, not to shipping.
     off = percent_of(bill_total, PREPAID_EXTRA_PERCENT) if method["prepaid"] else 0
-    return off, bill_total - off
+    return off, bill_total - off + shipping_for(bill_total)
 
 
 def find_method(method_id):
@@ -149,6 +188,54 @@ def find_method(method_id):
         if method["id"] == method_id:
             return method
     return None
+
+
+# ---- Address helpers ----
+def clean_address(data):
+    """Return (cleaned_dict, error_message). Exactly one of them is None."""
+    def text(key):
+        value = data.get(key)
+        return value.strip() if isinstance(value, str) else ""
+
+    cleaned = {
+        "full_name": text("full_name"),
+        "mobile": text("mobile"),
+        "pincode": text("pincode"),
+        "flat": text("flat"),
+        "area": text("area"),
+        "landmark": text("landmark"),
+        "city": text("city"),
+        "state": text("state"),
+        "type": text("type") or "Home",
+    }
+
+    if len(cleaned["full_name"]) < 2:
+        return None, "Enter your full name"
+    if not re.fullmatch(r"[6-9]\d{9}", cleaned["mobile"]):
+        return None, "Enter a valid 10-digit mobile number"
+    if not re.fullmatch(r"[1-9]\d{5}", cleaned["pincode"]):
+        return None, "Enter a valid 6-digit PIN code"
+    if not cleaned["flat"]:
+        return None, "Enter your flat / house number"
+    if not cleaned["area"]:
+        return None, "Enter your area / street"
+    if not cleaned["city"]:
+        return None, "Enter your city"
+    if cleaned["state"] not in INDIAN_STATES:
+        return None, "Choose a state"
+    if cleaned["type"] not in ADDRESS_TYPES:
+        return None, "Choose an address type"
+
+    return cleaned, None
+
+
+def address_to_text(address):
+    parts = [address["full_name"], address["flat"], address["area"]]
+    if address["landmark"]:
+        parts.append(address["landmark"])
+    parts.append(address["city"])
+    parts.append(f"{address['state']} - {address['pincode']}")
+    return ", ".join(parts) + f" · Phone: {address['mobile']}"
 
 
 # ---- Cart ----
@@ -238,6 +325,82 @@ def increase_quantity(item_id):
     return jsonify({"message": "Quantity updated"}), 200
 
 
+# ---- Addresses ----
+@app.route("/addresses")
+@login_required
+def list_addresses():
+    with closing(get_db_connection()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM addresses WHERE user_id = ? ORDER BY id DESC",
+            (g.user_id,)
+        ).fetchall()
+    return jsonify([dict(row) for row in rows])
+
+
+@app.route("/addresses", methods=["POST"])
+@login_required
+def add_address():
+    data = request.get_json(silent=True) or {}
+    cleaned, error = clean_address(data)
+    if error:
+        return jsonify({"error": error}), 400
+
+    with closing(get_db_connection()) as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) AS n FROM addresses WHERE user_id = ?", (g.user_id,)
+        ).fetchone()["n"]
+        if count >= MAX_ADDRESSES:
+            return jsonify({"error": f"You can save up to {MAX_ADDRESSES} addresses"}), 400
+
+        cursor = conn.execute(
+            "INSERT INTO addresses (user_id, full_name, mobile, pincode, flat, "
+            "area, landmark, city, state, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (g.user_id, cleaned["full_name"], cleaned["mobile"], cleaned["pincode"],
+             cleaned["flat"], cleaned["area"], cleaned["landmark"], cleaned["city"],
+             cleaned["state"], cleaned["type"])
+        )
+        conn.commit()
+        new_id = cursor.lastrowid
+
+    return jsonify({"message": "Address saved", "id": new_id}), 201
+
+
+@app.route("/addresses/<int:address_id>", methods=["PUT"])
+@login_required
+def update_address(address_id):
+    data = request.get_json(silent=True) or {}
+    cleaned, error = clean_address(data)
+    if error:
+        return jsonify({"error": error}), 400
+
+    with closing(get_db_connection()) as conn:
+        cursor = conn.execute(
+            "UPDATE addresses SET full_name = ?, mobile = ?, pincode = ?, flat = ?, "
+            "area = ?, landmark = ?, city = ?, state = ?, type = ? "
+            "WHERE id = ? AND user_id = ?",
+            (cleaned["full_name"], cleaned["mobile"], cleaned["pincode"],
+             cleaned["flat"], cleaned["area"], cleaned["landmark"], cleaned["city"],
+             cleaned["state"], cleaned["type"], address_id, g.user_id)
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Address not found"}), 404
+
+    return jsonify({"message": "Address updated"}), 200
+
+
+@app.route("/addresses/<int:address_id>", methods=["DELETE"])
+@login_required
+def delete_address(address_id):
+    with closing(get_db_connection()) as conn:
+        conn.execute(
+            "DELETE FROM addresses WHERE id = ? AND user_id = ?",
+            (address_id, g.user_id)
+        )
+        conn.commit()
+    return jsonify({"message": "Address deleted"}), 200
+
+
 # ---- Checkout ----
 @app.route("/checkout/summary")
 @login_required
@@ -260,6 +423,8 @@ def checkout_summary():
         "bill_total": bill_total,
         "free_shipping": bill_total >= FREE_SHIPPING_MIN,
         "free_shipping_remaining": max(0, FREE_SHIPPING_MIN - bill_total),
+        "shipping": shipping_for(bill_total),
+        "shipping_fee": SHIPPING_FEE,
         "prepaid_percent": PREPAID_EXTRA_PERCENT,
         "gifts": {
             "available": FREE_GIFTS,
@@ -275,19 +440,28 @@ def checkout_summary():
 @login_required
 def place_order():
     data = request.get_json(silent=True) or {}
-    address = (data.get("address") or "").strip()
+    address_id = data.get("address_id")
     method = find_method(data.get("payment_method"))
     option = (data.get("payment_option") or "").strip()
     chosen_gifts = data.get("gifts") or []
 
-    if not address:
-        return jsonify({"error": "Address is required"}), 400
+    if not isinstance(address_id, int) or isinstance(address_id, bool):
+        return jsonify({"error": "Choose a delivery address"}), 400
     if method is None:
         return jsonify({"error": "Choose a payment method"}), 400
     if method["options"] and option not in method["options"]:
         return jsonify({"error": "Choose an option for this payment method"}), 400
 
     with closing(get_db_connection()) as conn:
+        # Only this user's own addresses can be used.
+        address_row = conn.execute(
+            "SELECT * FROM addresses WHERE id = ? AND user_id = ?",
+            (address_id, g.user_id)
+        ).fetchone()
+        if address_row is None:
+            return jsonify({"error": "Delivery address not found"}), 400
+        address_text = address_to_text(dict(address_row))
+
         items = get_cart_rows(conn, g.user_id)
         if not items:
             return jsonify({"error": "Your cart is empty"}), 400
@@ -327,7 +501,7 @@ def place_order():
         cursor = conn.execute(
             "INSERT INTO orders (user_id, items, total, address, payment_method, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (g.user_id, json.dumps(items + gift_items), total, address,
+            (g.user_id, json.dumps(items + gift_items), total, address_text,
              payment_text, created_at)
         )
         conn.execute("DELETE FROM cart WHERE user_id = ?", (g.user_id,))

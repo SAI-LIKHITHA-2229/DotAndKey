@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { getOrders } from '../api/cart'
+import {
+  getAddresses,
+  addAddress,
+  updateAddress,
+  deleteAddress,
+} from '../api/addresses'
+import AddressForm from '../components/AddressForm'
 
 function formatDate(isoString) {
   return new Date(isoString).toLocaleDateString('en-IN', {
@@ -22,30 +29,69 @@ function getStatus(isoString, now) {
 function Account() {
   const { username } = useAuth()
   const [orders, setOrders] = useState([])
+  const [addresses, setAddresses] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // editing is: null (form closed), 'new' (adding), or an address (editing it)
+  const [editing, setEditing] = useState(null)
+  const formRef = useRef(null)
+
+  // When the form opens (Edit or Add), scroll to it and focus the first field.
   useEffect(() => {
-    async function loadOrders() {
+    if (editing === null || !formRef.current) return
+    formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    formRef.current.querySelector('input')?.focus({ preventScroll: true })
+  }, [editing])
+
+  useEffect(() => {
+    async function loadAll() {
       try {
-        const data = await getOrders()
+        const [orderData, addressData] = await Promise.all([
+          getOrders(),
+          getAddresses(),
+        ])
         const now = Date.now()
         setOrders(
-          data.map((order) => ({
+          orderData.map((order) => ({
             ...order,
             status: getStatus(order.created_at, now),
           }))
         )
+        setAddresses(addressData)
       } catch (err) {
         console.error(err)
-        setError("Couldn't load your orders.")
+        setError("Couldn't load your account details.")
       } finally {
         setLoading(false)
       }
     }
 
-    loadOrders()
+    loadAll()
   }, [])
+
+  // Called by the form. If it throws, the form shows the error.
+  async function handleSaveAddress(values) {
+    if (editing === 'new') {
+      await addAddress(values)
+    } else {
+      await updateAddress(editing.id, values)
+    }
+    setAddresses(await getAddresses())
+    setEditing(null)
+  }
+
+  async function handleDeleteAddress(id) {
+    if (!window.confirm('Delete this address?')) return
+
+    try {
+      await deleteAddress(id)
+      setAddresses(await getAddresses())
+    } catch (err) {
+      console.error(err)
+      setError('Could not delete the address. Please try again.')
+    }
+  }
 
   return (
     <section className="account-section">
@@ -58,8 +104,85 @@ function Account() {
         </div>
       </div>
 
-      {loading && <p>Loading your orders...</p>}
+      {loading && <p>Loading your account...</p>}
       {error && <p className="auth-error">{error}</p>}
+
+      {/* Saved addresses */}
+      {!loading && (
+        <div className="order-card address-book">
+          <div className="address-book-head">
+            <h3>My addresses</h3>
+            {addresses.length > 0 && (
+              <span className="address-count">
+                {addresses.length} saved
+              </span>
+            )}
+          </div>
+
+          <div className="address-grid">
+            {addresses.map((a) => (
+              <div
+                className={`address-card${editing?.id === a.id ? ' is-editing' : ''}`}
+                key={a.id}
+              >
+                <span className="address-type">{a.type}</span>
+                <strong className="address-name">{a.full_name}</strong>
+                <p className="address-text">
+                  {a.flat}, {a.area}
+                  {a.landmark ? `, ${a.landmark}` : ''}
+                  <br />
+                  {a.city}, {a.state} – {a.pincode}
+                </p>
+                <p className="address-phone">📞 {a.mobile}</p>
+
+                <div className="address-actions">
+                  <button
+                    type="button"
+                    className="address-btn"
+                    onClick={() => setEditing(a)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="address-btn is-danger"
+                    onClick={() => handleDeleteAddress(a.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {editing === null && (
+              <button
+                type="button"
+                className="address-add"
+                onClick={() => setEditing('new')}
+              >
+                <span className="address-add-plus">+</span>
+                {addresses.length === 0
+                  ? "You haven't saved any addresses yet. Add one"
+                  : 'Add new address'}
+              </button>
+            )}
+          </div>
+
+          {editing !== null && (
+            <div ref={formRef} className="address-form-anchor">
+              <h4 className="address-form-title">
+                {editing === 'new' ? 'Add a new address' : 'Edit address'}
+              </h4>
+              <AddressForm
+                key={editing === 'new' ? 'new' : editing.id}
+                initial={editing === 'new' ? null : editing}
+                onSave={handleSaveAddress}
+                onCancel={() => setEditing(null)}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {!loading && !error && orders.length === 0 && (
         <p className="orders-empty">

@@ -8,11 +8,17 @@ import {
   removeItem,
   placeOrder,
 } from '../api/cart'
+import { getAddresses, addAddress } from '../api/addresses'
+import AddressForm from '../components/AddressForm'
 
-// Fetch the cart and the server's checkout numbers together.
+// Fetch the cart, the server's checkout numbers and saved addresses together.
 async function fetchAll() {
-  const [items, summary] = await Promise.all([getCart(), getCheckoutSummary()])
-  return { items, summary }
+  const [items, summary, addresses] = await Promise.all([
+    getCart(),
+    getCheckoutSummary(),
+    getAddresses(),
+  ])
+  return { items, summary, addresses }
 }
 
 function Cart() {
@@ -20,10 +26,12 @@ function Cart() {
 
   const [items, setItems] = useState([])
   const [summary, setSummary] = useState(null)
+  const [addresses, setAddresses] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const [address, setAddress] = useState('')
+  const [addressId, setAddressId] = useState(null)
+  const [showForm, setShowForm] = useState(false)
   const [methodId, setMethodId] = useState('cod')
   const [option, setOption] = useState('')
   const [selectedGifts, setSelectedGifts] = useState([])
@@ -31,11 +39,18 @@ function Cart() {
   const [placing, setPlacing] = useState(false)
   const [placedOrder, setPlacedOrder] = useState(null)
 
-  // Save fresh data into state. If the cart shrank, keep only as many
-  // gifts as the server now allows.
-  function applyData({ items, summary }) {
+  // Save fresh data into state.
+  function applyData({ items, summary, addresses }) {
     setItems(items)
     setSummary(summary)
+    setAddresses(addresses)
+    // Keep the chosen address if it still exists, else pick the first one.
+    setAddressId((current) =>
+      addresses.some((a) => a.id === current)
+        ? current
+        : (addresses[0]?.id ?? null)
+    )
+    // If the cart shrank, keep only as many gifts as the server allows.
     setSelectedGifts((current) => current.slice(0, summary.gifts.max))
     setError('')
   }
@@ -72,6 +87,15 @@ function Cart() {
     }
   }
 
+  // Called by the address form. If it throws, the form shows the error.
+  async function handleSaveAddress(values) {
+    const { id } = await addAddress(values)
+    const list = await getAddresses()
+    setAddresses(list)
+    setAddressId(id)
+    setShowForm(false)
+  }
+
   function chooseMethod(method) {
     setMethodId(method.id)
     setOption(method.options[0] || '')
@@ -94,13 +118,13 @@ function Cart() {
     const method = summary.methods.find((m) => m.id === methodId)
 
     const order = {
-      address: address.trim(),
+      addressId,
       paymentMethod: method.id,
-      paymentOption: option,
+      paymentOption: option || method.options[0] || '',
       gifts: selectedGifts,
     }
 
-    // Prepaid methods go to the PIN page first (built in the next step).
+    // Prepaid methods go to the PIN page first.
     if (method.prepaid) {
       navigate('/payment', { state: order })
       return
@@ -142,6 +166,7 @@ function Cart() {
   }
 
   const method = summary?.methods.find((m) => m.id === methodId)
+  const formVisible = showForm || addresses.length === 0
 
   return (
     <section className="cart-section">
@@ -199,6 +224,14 @@ function Cart() {
                 <span>− ₹{method.discount}</span>
               </span>
             )}
+            <span className="bill-row">
+              <span>Shipping</span>
+              {summary.shipping > 0 ? (
+                <span>₹{summary.shipping}</span>
+              ) : (
+                <span className="bill-free">FREE</span>
+              )}
+            </span>
             <span className="bill-row bill-grand">
               <span>Total payable</span>
               <span>₹{method.total}</span>
@@ -206,10 +239,10 @@ function Cart() {
           </p>
 
           {/* Free shipping message */}
-          <div className="free-shipping">
+          <div className={`free-shipping${summary.free_shipping ? '' : ' locked'}`}>
             {summary.free_shipping
               ? '🎉 Woohoo! Free shipping on this order'
-              : `Add ₹${summary.free_shipping_remaining} more to unlock free shipping`}
+              : `🛍️ Shop for ₹${summary.free_shipping_remaining} more to get FREE delivery and save the ₹${summary.shipping_fee} shipping charge`}
           </div>
 
           {/* Free gifts */}
@@ -244,19 +277,56 @@ function Cart() {
             </div>
           </div>
 
-          <form onSubmit={handlePlaceOrder}>
-            <label className="auth-field">
-              <span>Delivery address</span>
-              <input
-                type="text"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="House no, street, city, PIN"
-                required
-              />
-            </label>
+          {/* Delivery address */}
+          <h3>Delivery address</h3>
 
-            {/* Payment methods */}
+          {addresses.length > 0 && (
+            <div className="payment-options">
+              {addresses.map((a) => (
+                <label className="pay-option" key={a.id}>
+                  <input
+                    type="radio"
+                    name="address"
+                    checked={a.id === addressId}
+                    onChange={() => setAddressId(a.id)}
+                  />
+                  <span>
+                    <strong className="addr-name">
+                      {a.full_name} ({a.type})
+                    </strong>
+                    <br />
+                    <small className="addr-line">
+                      {a.flat}, {a.area}
+                      {a.landmark ? `, ${a.landmark}` : ''}, {a.city}, {a.state} -{' '}
+                      {a.pincode}
+                    </small>
+                    <br />
+                    <small className="addr-phone">Phone: {a.mobile}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          {formVisible ? (
+            <AddressForm
+              onSave={handleSaveAddress}
+              onCancel={() => setShowForm(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              className="remove-btn"
+              onClick={() => setShowForm(true)}
+            >
+              + Add new address
+            </button>
+          )}
+
+          {/* Payment */}
+          <form onSubmit={handlePlaceOrder}>
+            <h3>Payment</h3>
+
             <div className="payment-options">
               {summary.methods.map((m) => (
                 <label className="pay-option" key={m.id}>
@@ -301,7 +371,13 @@ function Cart() {
               </label>
             )}
 
-            <button type="submit" className="checkout-btn" disabled={placing}>
+            {!addressId && <p>Save a delivery address to continue.</p>}
+
+            <button
+              type="submit"
+              className="checkout-btn"
+              disabled={placing || !addressId}
+            >
               {placing
                 ? 'Placing order...'
                 : method.prepaid

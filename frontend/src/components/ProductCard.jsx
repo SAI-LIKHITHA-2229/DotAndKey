@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAddToCart } from '../hooks/useAddToCart'
 import VariantPicker from './VariantPicker'
 import ProductModal from './ProductModal'
@@ -6,16 +7,24 @@ import ProductModal from './ProductModal'
 function ProductCard({ product }) {
   const variants = product.variants || []
   const [selectedIndex, setSelectedIndex] = useState(0)
+  // Variant under the mouse (null when none); only changes the picture.
+  const [previewIndex, setPreviewIndex] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
-  const { status, label, add } = useAddToCart(product)
+  const navigate = useNavigate()
 
   const selected = variants[selectedIndex] || null
+  const { status, label, inCart, shownInCart, add } = useAddToCart(
+    product,
+    selected?.label ?? null,
+    variants[previewIndex]?.label ?? null
+  )
   const image = selected?.image || product.image
+  const shownImage = variants[previewIndex]?.image || image
 
   return (
     <div className="product-card">
       <img
-        src={`/images/${image}`}
+        src={`/images/${shownImage}`}
         alt={product.name}
         className="product-image"
         onClick={() => setModalOpen(true)}
@@ -30,13 +39,16 @@ function ProductCard({ product }) {
       <VariantPicker
         variants={variants}
         selectedIndex={selectedIndex}
+        previewIndex={previewIndex}
         onSelect={setSelectedIndex}
+        onPreview={setPreviewIndex}
       />
 
       <button
-        className="add-to-cart-btn"
+        className={`add-to-cart-btn${shownInCart ? ' in-cart' : ''}`}
         disabled={status === 'adding'}
-        onClick={() => add(selected ? selected.label : null, image)}
+        // Already in the cart: go there to change the quantity instead.
+        onClick={() => (inCart ? navigate('/cart') : add(image))}
       >
         {label}
       </button>

@@ -2,8 +2,13 @@ import { request } from './client'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
+// The name a product (and chosen variant) is stored under in the cart.
+export function cartItemName(product, variant) {
+  return variant ? `${product.name} (${variant})` : product.name
+}
+
 export function addToCart(product, variant, image) {
-  const name = variant ? `${product.name} (${variant})` : product.name
+  const name = cartItemName(product, variant)
 
   return request('/cart', {
     method: 'POST',
@@ -32,20 +37,19 @@ export function removeItem(id) {
   return request(`/cart/${id}`, { method: 'DELETE' })
 }
 
-// New: asks the server for all checkout numbers
+// Asks the server for all checkout numbers
 // (discount, free shipping, gifts, payment methods with totals).
 export function getCheckoutSummary() {
   return request('/checkout/summary')
 }
 
-// Changed: now sends the payment method id, the chosen option
-// (like "Visa"), and the chosen free gifts.
-export function placeOrder({ address, paymentMethod, paymentOption, gifts }) {
+// Changed: sends the saved address id instead of typed text.
+export function placeOrder({ addressId, paymentMethod, paymentOption, gifts }) {
   return request('/orders', {
     method: 'POST',
     headers: JSON_HEADERS,
     body: JSON.stringify({
-      address,
+      address_id: addressId,
       payment_method: paymentMethod,
       payment_option: paymentOption,
       gifts,

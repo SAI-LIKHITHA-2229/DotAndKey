@@ -93,6 +93,25 @@ body.cart-page {
     transform: scale(1.1);
 }
 
+/* Current page: pink circle behind the icon + underlined label.
+   box-shadow draws the circle without changing the icon's size. */
+.nav-link.active {
+    color: #d11267;
+}
+
+.nav-link.active .nav-icon {
+    background: #fde4ef;
+    border-radius: 50%;
+    box-shadow: 0 0 0 6px #fde4ef;
+    stroke-width: 2.2;
+}
+
+.nav-link.active span {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 4px;
+}
+
 @keyframes nav-pop {
     0%   { transform: scale(1); }
     22%  { transform: scale(1.42); }
@@ -344,8 +363,9 @@ body.cart-page {
 }
 
 .add-to-cart-btn {
-    background-color: #ff4d9d;
+    background-color: #ff1f85;
     color: white;
+    font-weight: 700;
     border: none;
     padding: 8px 16px;
     border-radius: 6px;
@@ -375,6 +395,18 @@ body.cart-page {
 #modalAddToCart.atc-added {
     background-color: #2e9b57;
     color: #fff;
+}
+
+/* This item is already in the cart: green, and clicking opens the cart. */
+.add-to-cart-btn.in-cart,
+#modalAddToCart.in-cart {
+    background-color: #2e9b57;
+    box-shadow: 0 3px 10px rgba(46, 155, 87, 0.3);
+}
+
+.add-to-cart-btn.in-cart:hover,
+#modalAddToCart.in-cart:hover {
+    background-color: #24804a;
 }
 
 .btn-ring {
@@ -503,7 +535,8 @@ body.cart-page {
     color: #555;
 }
 
-.bill-discount {
+.bill-discount,
+.bill-free {
     color: #1f7a44;
     font-weight: 600;
 }
@@ -1408,17 +1441,19 @@ body.pay-page {
 }
 
 #modalAddToCart {
-    background-color: #ff4d9d;
+    background-color: #ff1f85;
     color: white;
+    font-weight: 700;
     border: none;
     padding: 10px 20px;
     border-radius: 6px;
     cursor: pointer;
+    box-shadow: 0 3px 10px rgba(255, 31, 133, 0.35);
     transition: background-color 0.2s ease;
 }
 
 #modalAddToCart:hover {
-    background-color: #e63c8a;
+    background-color: #e8106f;
 }
 
 .close-btn {
@@ -1459,17 +1494,19 @@ body.pay-page {
 }
 
 .add-to-cart-btn {
-    background-color: #ff4d9d;
+    background-color: #ff1f85;
     color: white;
+    font-weight: 700;
     border: none;
     padding: 8px 16px;
     border-radius: 6px;
     cursor: pointer;
+    box-shadow: 0 3px 10px rgba(255, 31, 133, 0.35);
     transition: background-color 0.2s ease;
 }
 
 .add-to-cart-btn:hover {
-    background-color: #e63c8a;
+    background-color: #e8106f;
 }
 
 .banners {
@@ -1486,12 +1523,160 @@ body.pay-page {
     width: 100%;
     border-radius: 12px;
     display: block;
-    cursor: pointer;
-    transition: transform 0.2s ease;
 }
 
-.banner-img:hover {
-    transform: scale(1.01);
+/* Small gap above the address form when the page scrolls to it. */
+.address-form-anchor {
+    scroll-margin-top: 20px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid #f2e6ec;
+}
+
+/* ---- Account page: saved addresses ---- */
+.address-book-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.account-section .address-book-head h3 {
+    margin: 0;
+    font-size: 17px;
+    color: #1f2937;
+}
+
+.address-count {
+    font-size: 12px;
+    color: #9a7186;
+}
+
+.address-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+}
+
+.address-card {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px;
+    background: #fffafc;
+    border: 1px solid #f0dbe6;
+    border-radius: 12px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.address-card:hover {
+    border-color: #e9b3cc;
+    box-shadow: 0 4px 14px rgba(209, 18, 103, 0.08);
+}
+
+.address-card.is-editing {
+    border-color: #d11267;
+    box-shadow: 0 0 0 3px rgba(209, 18, 103, 0.12);
+}
+
+.address-type {
+    align-self: flex-start;
+    margin-bottom: 8px;
+    padding: 2px 10px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #b3286c;
+    background: #fde4ef;
+    border-radius: 999px;
+}
+
+.address-name {
+    font-size: 15px;
+    color: #1f2937;
+}
+
+.address-text {
+    margin: 6px 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #555;
+}
+
+.address-phone {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: #555;
+}
+
+.address-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: auto;
+    padding-top: 12px;
+}
+
+.address-btn {
+    padding: 5px 14px;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #d11267;
+    background: #fff;
+    border: 1px solid #eec3d7;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.address-btn:hover {
+    background: #fff0f6;
+    border-color: #d11267;
+}
+
+.address-btn.is-danger {
+    color: #9a3b26;
+    border-color: #ecd2c9;
+}
+
+.address-btn.is-danger:hover {
+    background: #fff3ef;
+    border-color: #c0392b;
+}
+
+.address-add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 150px;
+    padding: 14px;
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #b3286c;
+    background: transparent;
+    border: 2px dashed #eec3d7;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.address-add:hover {
+    background: #fff0f6;
+    border-color: #d11267;
+}
+
+.address-add-plus {
+    font-size: 26px;
+    line-height: 1;
+}
+
+.address-form-title {
+    margin: 0 0 12px;
+    font-size: 15px;
+    color: #1f2937;
 }
 
 .nav-logout {
