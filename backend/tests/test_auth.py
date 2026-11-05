@@ -39,6 +39,24 @@ def test_login_uses_same_message_for_unknown_user_and_wrong_password(client):
     assert wrong_password.get_json() == unknown_user.get_json()
 
 
+def test_unknown_user_still_runs_a_password_check(client, monkeypatch):
+    """Both failure paths do the same (slow) hash work, so timing reveals nothing."""
+    import api.auth
+
+    calls = []
+    real_check = api.auth.check_password_hash
+    monkeypatch.setattr(api.auth, "check_password_hash",
+                        lambda stored, given: calls.append(stored) or real_check(stored, given))
+
+    make_user(client)
+    calls.clear()
+    client.post("/login", json={"username": "alice", "password": "wrong-password"})
+    client.post("/login", json={"username": "nobody", "password": "wrong-password"})
+
+    assert len(calls) == 2
+    assert calls[1] == api.auth.DUMMY_PASSWORD_HASH
+
+
 def test_protected_routes_require_a_valid_token(client):
     assert client.get("/cart").status_code == 401
     bad = {"Authorization": "Bearer not-a-real-token"}

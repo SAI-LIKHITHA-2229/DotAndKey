@@ -17,6 +17,10 @@ bp = Blueprint("auth", __name__)
 USERNAME_PATTERN = re.compile(r"[A-Za-z0-9_.]{3,30}")
 PASSWORD_MIN, PASSWORD_MAX = 8, 128
 
+# Checked when a username doesn't exist, so a failed login takes the same
+# time either way and can't reveal which usernames are registered.
+DUMMY_PASSWORD_HASH = generate_password_hash("not-a-real-password")
+
 
 def login_required(view):
     @wraps(view)
@@ -77,7 +81,9 @@ def login():
             (username,)
         ).fetchone()
 
-    if user is None or not check_password_hash(user["password_hash"], password):
+    stored_hash = user["password_hash"] if user else DUMMY_PASSWORD_HASH
+    password_ok = check_password_hash(stored_hash, password)
+    if user is None or not password_ok:
         return jsonify({"error": "Invalid username or password"}), 401
 
     expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
