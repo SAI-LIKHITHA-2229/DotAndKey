@@ -561,6 +561,10 @@ def place_order():
         return jsonify({"error": "Choose an option for this payment method"}), 400
 
     with closing(get_db_connection()) as conn:
+        # Lock the database for the whole order so the cart cannot change
+        # between reading it and emptying it. Early returns roll back.
+        conn.execute("BEGIN IMMEDIATE")
+
         # Only this user's own addresses can be used.
         address_row = conn.execute(
             "SELECT * FROM addresses WHERE id = ? AND user_id = ?",
@@ -574,7 +578,7 @@ def place_order():
         if not items:
             return jsonify({"error": "Your cart is empty"}), 400
 
-        subtotal, discount, bill_total = price_cart(items)
+        _, _, bill_total = price_cart(items)
         max_gifts = max_gifts_for(bill_total)
 
         if max_gifts >= len(FREE_GIFTS):
