@@ -14,7 +14,7 @@ export function AuthProvider({ children }) {
     getToken() ? getStoredUsername() : null
   )
 
-    useEffect(() => {
+  useEffect(() => {
     function handleExpired() {
       setUsername(null)
     }
