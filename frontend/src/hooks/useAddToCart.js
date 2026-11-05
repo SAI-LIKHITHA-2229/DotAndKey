@@ -19,10 +19,10 @@ export function useAddToCart(product, variantLabel, previewLabel = null) {
   const { isInCart, markAdded } = useCart()
   const inCart = isInCart(cartItemName(product, variantLabel))
 
-  async function add(image, onSuccess) {
+  async function add(onSuccess) {
     setStatus('adding')
     try {
-      await addToCart(product, variantLabel, image)
+      await addToCart(product, variantLabel)
       markAdded(cartItemName(product, variantLabel))
       setStatus('added')
       if (onSuccess) onSuccess()

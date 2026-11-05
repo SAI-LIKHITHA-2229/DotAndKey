@@ -48,7 +48,7 @@ function ProductCard({ product }) {
         className={`add-to-cart-btn${shownInCart ? ' in-cart' : ''}`}
         disabled={status === 'adding'}
         // Already in the cart: go there to change the quantity instead.
-        onClick={() => (inCart ? navigate('/cart') : add(image))}
+        onClick={() => (inCart ? navigate('/cart') : add())}
       >
         {label}
       </button>

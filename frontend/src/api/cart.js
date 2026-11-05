@@ -7,17 +7,13 @@ export function cartItemName(product, variant) {
   return variant ? `${product.name} (${variant})` : product.name
 }
 
-export function addToCart(product, variant, image) {
-  const name = cartItemName(product, variant)
-
+// Only says which product/variant to add; the server looks up the
+// name, price and image itself so they can't be tampered with.
+export function addToCart(product, variant) {
   return request('/cart', {
     method: 'POST',
     headers: JSON_HEADERS,
-    body: JSON.stringify({
-      product_name: name,
-      price: product.price,
-      image: image || product.image,
-    }),
+    body: JSON.stringify({ product_id: product.id, variant: variant || null }),
   })
 }
 

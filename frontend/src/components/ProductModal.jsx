@@ -70,7 +70,7 @@ function ProductModal({ product, initialIndex, onClose }) {
             onClick={() =>
               inCart
                 ? navigate('/cart')
-                : add(image, () => setTimeout(onClose, 600))
+                : add(() => setTimeout(onClose, 600))
             }
           >
             {label}

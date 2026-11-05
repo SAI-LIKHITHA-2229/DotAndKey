@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import { products } from '../data/products'
 import ProductCard from '../components/ProductCard'
+import { useProducts } from '../hooks/useProducts'
 
 const RECOMMENDED_NAMES = [
   'Sunscreen',
@@ -14,6 +14,7 @@ const RECOMMENDED_NAMES = [
 ]
 
 function Home() {
+  const { products, loading, error } = useProducts()
   const recommended = products.filter((product) =>
     RECOMMENDED_NAMES.includes(product.name)
   )
@@ -45,6 +46,8 @@ function Home() {
 
       <section className="bestsellers">
         <h2>Our Recommendations</h2>
+        {loading && <p>Loading products...</p>}
+        {error && <p className="auth-error">{error}</p>}
         <div className="product-grid">
           {recommended.map((product) => (
             <ProductCard key={product.id} product={product} />

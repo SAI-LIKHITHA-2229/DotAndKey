@@ -85,6 +85,36 @@ ADDRESS_TYPES = ["Home", "Work", "Other"]
 MAX_ADDRESSES = 10
 
 
+# ---- Product catalog (the server decides names, prices and images) ----
+def load_catalog():
+    with open(os.path.join(BASE_DIR, "products.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+PRODUCTS = load_catalog()
+PRODUCTS_BY_ID = {product["id"]: product for product in PRODUCTS}
+
+
+def resolve_cart_item(product_id, variant_label):
+    """Return (name, price, image) for a catalog item, or None if invalid."""
+    product = PRODUCTS_BY_ID.get(product_id)
+    if product is None:
+        return None
+
+    variants = product.get("variants") or []
+    if not variants:
+        # Products without variants are added without a label.
+        if variant_label:
+            return None
+        return product["name"], product["price"], product["image"]
+
+    variant = next((v for v in variants if v["label"] == variant_label), None)
+    if variant is None:
+        return None
+    name = f"{product['name']} ({variant['label']})"
+    return name, product["price"], variant.get("image") or product["image"]
+
+
 def get_db_connection():
     # timeout / busy_timeout: wait for a lock instead of failing or hanging.
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
@@ -273,10 +303,15 @@ def handle_unexpected_error(_error):
     return jsonify({"error": "Something went wrong on our side"}), 500
 
 
-# ---- Health check (public) ----
+# ---- Health and catalog (public) ----
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/products")
+def list_products():
+    return jsonify(PRODUCTS)
 
 
 # ---- Cart ----
@@ -293,14 +328,22 @@ def get_cart():
 @app.route("/cart", methods=["POST"])
 @login_required
 def add_to_cart():
-    new_item = request.get_json(silent=True) or {}
-    if not new_item.get("product_name"):
-        return jsonify({"error": "product_name is required"}), 400
+    # The client only says *what* to add; name, price and image come from
+    # the catalog so they cannot be tampered with.
+    data = request.get_json(silent=True) or {}
+    product_id = data.get("product_id")
+    if not isinstance(product_id, int) or isinstance(product_id, bool):
+        return jsonify({"error": "product_id is required"}), 400
+
+    resolved = resolve_cart_item(product_id, data.get("variant"))
+    if resolved is None:
+        return jsonify({"error": "Unknown product or variant"}), 400
+    name, price, image = resolved
 
     with closing(get_db_connection()) as conn:
         existing = conn.execute(
             "SELECT id FROM cart WHERE product_name = ? AND user_id = ?",
-            (new_item["product_name"], g.user_id)
+            (name, g.user_id)
         ).fetchone()
 
         if existing:
@@ -312,8 +355,7 @@ def add_to_cart():
             conn.execute(
                 "INSERT INTO cart (product_name, price, quantity, image, user_id) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (new_item["product_name"], new_item.get("price", 0), 1,
-                 new_item.get("image"), g.user_id)
+                (name, price, 1, image, g.user_id)
             )
         conn.commit()
 
