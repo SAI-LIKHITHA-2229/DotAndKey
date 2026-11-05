@@ -1,6 +1,14 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Local environment files (commit the .env.example templates instead)
+.env
+.env.*
+!.env.example
 
 # Runtime database (created by app.py; not source)
 cart.db

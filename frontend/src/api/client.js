@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5001'
 const TOKEN_KEY = 'dk_token'
 const USER_KEY = 'dk_user'
 
@@ -44,7 +44,7 @@ export async function request(path, options = {}) {
   }
 
   const response = await fetch(`${API_URL}${path}`, { ...options, headers })
-    const data = await response.json().catch(() => ({}))
+  const data = await response.json().catch(() => ({}))
 
   if (response.status === 401 && token) {
     clearSession()
