@@ -17,6 +17,13 @@ from .validation import json_body, text_field
 
 bp = Blueprint("orders", __name__)
 
+# Orders start "confirmed"; a fulfilment system would move them to
+# "shipped" and "delivered". Prepaid methods use a demo payment step (no
+# money is taken), recorded honestly as "demo_paid"; cash on delivery and
+# pay later stay "pending" until the customer pays.
+ORDER_STATUSES = ("confirmed", "shipped", "delivered", "cancelled")
+PAYMENT_STATUSES = ("pending", "demo_paid")
+
 
 @bp.route("/checkout/summary")
 @login_required
@@ -122,19 +129,21 @@ def place_order():
 
         _, total = method_total(bill_total, method)
         payment_text = method["title"] + (f" · {option}" if option else "")
+        payment_status = "demo_paid" if method["prepaid"] else "pending"
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         cursor = conn.execute(
-            "INSERT INTO orders (user_id, items, total, address, payment_method, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO orders (user_id, items, total, address, payment_method, "
+            "payment_status, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?)",
             (g.user_id, json.dumps(items + gift_items), total, address_text,
-             payment_text, created_at)
+             payment_text, payment_status, created_at)
         )
         conn.execute("DELETE FROM cart WHERE user_id = ?", (g.user_id,))
         conn.commit()
         order_id = cursor.lastrowid
 
-    return jsonify({"message": "Order placed", "order_id": order_id, "total": total}), 201
+    return jsonify({"message": "Order placed", "order_id": order_id, "total": total,
+                    "status": "confirmed", "payment_status": payment_status}), 201
 
 
 @bp.route("/orders")

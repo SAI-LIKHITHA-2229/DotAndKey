@@ -68,6 +68,19 @@ def test_order_flow(client, auth):
     [order] = client.get("/orders", headers=auth).get_json()
     assert order["total"] == 319 + 70
     assert order["items"][0]["product_name"] == "Lip Mask"
+    assert order["status"] == "confirmed"
+    assert order["payment_status"] == "pending"          # cash on delivery
+
+
+def test_prepaid_orders_are_marked_as_demo_payments(client, auth):
+    address_id = client.post("/addresses", headers=auth, json=VALID_ADDRESS).get_json()["id"]
+    client.post("/cart", headers=auth, json={"product_id": 6, "variant": None})
+
+    response = place(client, auth, address_id=address_id, payment_method="card",
+                     payment_option="Visa")
+    assert response.status_code == 201
+    assert response.get_json()["payment_status"] == "demo_paid"
+    assert response.get_json()["total"] == 319 - 16 + 70  # 5% prepaid off, then shipping
 
 
 def test_order_rejects_bad_input(client, auth):

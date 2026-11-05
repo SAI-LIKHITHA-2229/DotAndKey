@@ -186,11 +186,25 @@ def _v4_token_version(conn):
     conn.execute("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
 
 
+def _v5_order_status(conn):
+    """Store order and payment status on the server instead of guessing them."""
+    conn.execute("ALTER TABLE orders ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'")
+    conn.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'")
+    # Existing card / wallet / netbanking orders went through the demo PIN page.
+    conn.execute("""
+        UPDATE orders SET payment_status = 'demo_paid'
+        WHERE payment_method LIKE 'Debit/Credit cards%'
+           OR payment_method LIKE 'Wallets%'
+           OR payment_method LIKE 'Netbanking%'
+    """)
+
+
 MIGRATIONS = [
     _v1_initial_schema,
     _v2_foreign_keys_and_indexes,
     _v3_cart_references_catalog,
     _v4_token_version,
+    _v5_order_status,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 

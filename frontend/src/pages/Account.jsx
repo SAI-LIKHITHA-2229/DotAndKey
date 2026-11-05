@@ -19,11 +19,19 @@ function formatDate(isoString) {
   })
 }
 
-function getStatus(isoString, now) {
-  const ageDays = (now - new Date(isoString).getTime()) / 86400000
-  if (ageDays > 6) return 'Delivered'
-  if (ageDays > 2) return 'Out for delivery'
-  return 'Order confirmed'
+// Labels for the statuses the server stores on each order.
+const ORDER_STATUS_LABELS = {
+  confirmed: 'Order confirmed',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+}
+
+function paymentText(order) {
+  if (order.payment_status === 'demo_paid') {
+    return `Paid via ${order.payment_method} (demo, no money charged)`
+  }
+  return `${order.payment_method} · payment due on delivery`
 }
 
 function Account() {
@@ -51,13 +59,7 @@ function Account() {
           getOrders(),
           getAddresses(),
         ])
-        const now = Date.now()
-        setOrders(
-          orderData.map((order) => ({
-            ...order,
-            status: getStatus(order.created_at, now),
-          }))
-        )
+        setOrders(orderData)
         setAddresses(addressData)
       } catch (err) {
         console.error(err)
@@ -202,10 +204,10 @@ function Account() {
             </div>
             <span
               className={`order-status${
-                order.status === 'Delivered' ? ' is-delivered' : ''
+                order.status === 'delivered' ? ' is-delivered' : ''
               }`}
             >
-              {order.status}
+              {ORDER_STATUS_LABELS[order.status] || order.status}
             </span>
           </div>
 
@@ -227,11 +229,11 @@ function Account() {
           </div>
 
           <div className="order-foot">
-            <span>Paid via {order.payment_method}</span>
+            <span>{paymentText(order)}</span>
             <span className="order-total">Total ₹{order.total}</span>
           </div>
           <p className="order-address">
-            <strong>Delivered to:</strong> {order.address}
+            <strong>Delivery address:</strong> {order.address}
           </p>
         </div>
       ))}

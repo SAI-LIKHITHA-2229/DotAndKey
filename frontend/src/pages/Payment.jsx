@@ -77,9 +77,10 @@ function Payment() {
   return (
     <section className="cart-section">
       <h2>Secure payment</h2>
-      <p>
-        Paying with {order.paymentOption || order.paymentMethod}. This is a
-        demo, so any 4-digit PIN works.
+      <p>Paying with {order.paymentOption || order.paymentMethod}.</p>
+      <p className="demo-note" role="note">
+        <strong>Demo payment:</strong> no real money is charged and no card
+        details are collected. Any 4-digit PIN works.
       </p>
 
       <form onSubmit={handlePay}>

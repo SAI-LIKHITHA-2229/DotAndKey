@@ -1533,6 +1533,17 @@ body.pay-page {
     border-top: 1px solid #f2e6ec;
 }
 
+/* Payment page: makes clear that the PIN step is a demo. */
+.demo-note {
+    margin: 12px 0 18px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #7a4a00;
+    background: #fff6e0;
+    border: 1px solid #f2d28b;
+    border-radius: 10px;
+}
+
 /* ---- Account page: saved addresses ---- */
 .address-book-head {
     display: flex;
