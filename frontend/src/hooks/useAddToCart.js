@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { addToCart, cartItemName } from '../api/cart'
 import { useCart } from '../context/CartContext'
 
@@ -19,7 +19,13 @@ export function useAddToCart(product, variantLabel, previewLabel = null) {
   const { isInCart, markAdded } = useCart()
   const inCart = isInCart(cartItemName(product, variantLabel))
 
+  // Timer that turns "Added ✓" / "Try again" back into the normal label.
+  // Cleared on unmount so it never fires for a card that is gone.
+  const resetTimer = useRef(null)
+  useEffect(() => () => clearTimeout(resetTimer.current), [])
+
   async function add(onSuccess) {
+    clearTimeout(resetTimer.current)
     setStatus('adding')
     try {
       await addToCart(product, variantLabel)
@@ -30,7 +36,7 @@ export function useAddToCart(product, variantLabel, previewLabel = null) {
       console.error(error)
       setStatus('error')
     }
-    setTimeout(() => setStatus('idle'), 1400)
+    resetTimer.current = setTimeout(() => setStatus('idle'), 1400)
   }
 
   const previewing = previewLabel !== null && previewLabel !== variantLabel
