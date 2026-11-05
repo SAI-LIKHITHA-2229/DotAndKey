@@ -17,6 +17,8 @@ def app(tmp_path):
         "TESTING": True,
         "SECRET_KEY": TEST_SECRET,
         "DATABASE_PATH": str(tmp_path / "test.db"),
+        # Most tests log in many times; the rate-limit test turns it back on.
+        "RATELIMIT_ENABLED": False,
     })
 
 

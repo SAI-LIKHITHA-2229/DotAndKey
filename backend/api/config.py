@@ -37,6 +37,8 @@ def load_config(overrides=None):
         "CORS_ORIGINS": cors_origins,
         "TOKEN_HOURS": 12,
         "MAX_CONTENT_LENGTH": 32 * 1024,   # requests are small JSON bodies
+        "RATELIMIT_ENABLED": os.environ.get("RATELIMIT_ENABLED", "true").lower() != "false",
+        "RATELIMIT_STORAGE_URI": os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
     }
     config.update(overrides)
     return config

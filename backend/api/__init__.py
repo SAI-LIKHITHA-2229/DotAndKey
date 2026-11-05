@@ -8,6 +8,7 @@ from werkzeug.exceptions import HTTPException
 from . import addresses, auth, cart, catalog, orders
 from .config import load_config
 from .db import init_db
+from .extensions import limiter
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ def create_app(overrides=None):
     app.config.update(load_config(overrides))
 
     CORS(app, origins=app.config["CORS_ORIGINS"])
+    limiter.init_app(app)
 
     for module in (auth, catalog, cart, addresses, orders):
         app.register_blueprint(module.bp)
@@ -37,6 +39,10 @@ def create_app(overrides=None):
 
 def register_error_handlers(app):
     # Always answer with JSON, never an HTML error page.
+    @app.errorhandler(429)
+    def handle_rate_limited(_error):
+        return jsonify({"error": "Too many attempts. Please wait a minute and try again."}), 429
+
     @app.errorhandler(HTTPException)
     def handle_http_error(error):
         return jsonify({"error": error.description}), error.code

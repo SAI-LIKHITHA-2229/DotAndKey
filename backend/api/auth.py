@@ -9,6 +9,7 @@ from flask import Blueprint, current_app, g, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .db import get_db_connection
+from .extensions import limiter
 from .validation import json_body, raw_text_field, text_field
 
 bp = Blueprint("auth", __name__)
@@ -42,6 +43,7 @@ def login_required(view):
 
 
 @bp.route("/register", methods=["POST"])
+@limiter.limit("10 per hour")          # slows down mass account creation
 def register():
     data = json_body()
     username = text_field(data, "username")
@@ -70,6 +72,7 @@ def register():
 
 
 @bp.route("/login", methods=["POST"])
+@limiter.limit("10 per minute; 50 per hour")   # stops password guessing
 def login():
     data = json_body()
     username = text_field(data, "username")
