@@ -1,4 +1,5 @@
-import app as app_module
+from api.cart import MAX_QUANTITY
+from api.catalog import PRODUCTS, PRODUCTS_BY_ID
 from conftest import make_user
 
 MOISTURIZER_ID = 1
@@ -14,7 +15,7 @@ def add(client, auth, product_id=MOISTURIZER_ID, variant=VARIANT, **extra):
 def test_products_are_public(client):
     response = client.get("/products")
     assert response.status_code == 200
-    assert len(response.get_json()) == len(app_module.PRODUCTS)
+    assert len(response.get_json()) == len(PRODUCTS)
 
 
 def test_price_comes_from_catalog_not_client(client, auth):
@@ -23,7 +24,7 @@ def test_price_comes_from_catalog_not_client(client, auth):
 
     [item] = client.get("/cart", headers=auth).get_json()
     assert item["product_name"] == f"Moisturizer ({VARIANT})"
-    assert item["price"] == app_module.PRODUCTS_BY_ID[MOISTURIZER_ID]["price"]
+    assert item["price"] == PRODUCTS_BY_ID[MOISTURIZER_ID]["price"]
     assert item["image"] == "moisturizer.jpg"
 
 
@@ -47,7 +48,7 @@ def test_adding_same_item_twice_increases_quantity(client, auth):
 
 
 def test_quantity_is_capped(client, auth):
-    for _ in range(app_module.MAX_QUANTITY):
+    for _ in range(MAX_QUANTITY):
         assert add(client, auth).status_code == 201
     assert add(client, auth).status_code == 400
 

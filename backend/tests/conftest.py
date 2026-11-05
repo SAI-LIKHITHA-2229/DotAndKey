@@ -1,25 +1,28 @@
 import os
 import sys
-import tempfile
 
 import pytest
 
-# Point the app at a throwaway database *before* it is imported,
-# so the import-time init_db() never touches the real cart.db.
-os.environ["DATABASE_PATH"] = os.path.join(tempfile.mkdtemp(), "import.db")
-os.environ.setdefault("SECRET_KEY", "test-secret-key-that-is-at-least-32-bytes")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app as app_module  # noqa: E402
+from api import create_app  # noqa: E402
+
+TEST_SECRET = "test-secret-key-that-is-at-least-32-bytes"
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    """A test client backed by a fresh, empty database for every test."""
-    monkeypatch.setattr(app_module, "DATABASE_PATH", str(tmp_path / "test.db"))
-    app_module.init_db()
-    app_module.app.config["TESTING"] = True
-    with app_module.app.test_client() as test_client:
+def app(tmp_path):
+    """A fresh app backed by an empty temporary database for every test."""
+    return create_app({
+        "TESTING": True,
+        "SECRET_KEY": TEST_SECRET,
+        "DATABASE_PATH": str(tmp_path / "test.db"),
+    })
+
+
+@pytest.fixture
+def client(app):
+    with app.test_client() as test_client:
         yield test_client
 
 

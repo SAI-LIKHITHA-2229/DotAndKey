@@ -1,6 +1,6 @@
 import pytest
 
-import app as app_module
+from api import pricing
 from conftest import VALID_ADDRESS, make_user
 
 
@@ -9,12 +9,12 @@ from conftest import VALID_ADDRESS, make_user
     [(0, 0), (499, 70), (999, 70), (1000, 0), (1500, 0)],
 )
 def test_shipping_rule(bill, expected):
-    assert app_module.shipping_for(bill) == expected
+    assert pricing.shipping_for(bill) == expected
 
 
 def test_prepaid_discount_does_not_apply_to_shipping():
-    card = app_module.find_method("card")
-    off, total = app_module.method_total(499, card)
+    card = pricing.find_method("card")
+    off, total = pricing.method_total(499, card)
     assert off == 25
     assert total == 499 - 25 + 70
 
@@ -80,7 +80,7 @@ def test_order_rejects_bad_input(client, auth):
                  payment_option="Monopoly Money").status_code == 400
     # Bill is below the first free-gift threshold, so no gifts are allowed.
     assert place(client, auth, address_id=address_id,
-                 gifts=[app_module.FREE_GIFTS[0]["name"]]).status_code == 400
+                 gifts=[pricing.FREE_GIFTS[0]["name"]]).status_code == 400
 
     bob = make_user(client, "bob")
     client.post("/cart", headers=bob, json={"product_id": 6, "variant": None})

@@ -1,7 +1,6 @@
 import jwt
 
-import app as app_module
-from conftest import make_user
+from conftest import TEST_SECRET, make_user
 
 
 def test_register_and_login_returns_token(client):
@@ -13,7 +12,7 @@ def test_register_and_login_returns_token(client):
     body = response.get_json()
     assert body["username"] == "alice"
 
-    payload = jwt.decode(body["token"], app_module.SECRET_KEY, algorithms=["HS256"])
+    payload = jwt.decode(body["token"], TEST_SECRET, algorithms=["HS256"])
     assert payload["username"] == "alice"
     assert "exp" in payload
 
