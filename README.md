@@ -145,8 +145,9 @@ frontend/
   src/context/        AuthContext, CartContext
   src/hooks/          useProducts, useAddToCart
   src/pages/          Home, Shop, Cart, Payment, Account, Login
-legacy/               Original HTML/CSS/JS version, kept for reference
 ```
+
+The original HTML/CSS/JS version of the site is preserved under the Git tag [`legacy-v1`](https://github.com/SAI-LIKHITHA-2229/DotAndKey/tree/legacy-v1/legacy).
 
 ## Notes
 
