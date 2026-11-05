@@ -2,7 +2,7 @@ import datetime
 import json
 from contextlib import closing
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify
 
 from .addresses import address_to_text
 from .auth import login_required
@@ -13,6 +13,7 @@ from .pricing import (
     PREPAID_EXTRA_PERCENT, SHIPPING_FEE, find_method, max_gifts_for, method_total,
     price_cart, shipping_for,
 )
+from .validation import json_body, text_field
 
 bp = Blueprint("orders", __name__)
 
@@ -54,10 +55,10 @@ def checkout_summary():
 @bp.route("/orders", methods=["POST"])
 @login_required
 def place_order():
-    data = request.get_json(silent=True) or {}
+    data = json_body()
     address_id = data.get("address_id")
-    method = find_method(data.get("payment_method"))
-    option = (data.get("payment_option") or "").strip()
+    method = find_method(text_field(data, "payment_method"))
+    option = text_field(data, "payment_option")
     chosen_gifts = data.get("gifts") or []
 
     if not isinstance(address_id, int) or isinstance(address_id, bool):

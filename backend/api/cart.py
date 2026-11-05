@@ -1,10 +1,11 @@
 from contextlib import closing
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify
 
 from .auth import login_required
 from .catalog import resolve_cart_item
 from .db import get_db_connection
+from .validation import json_body
 
 bp = Blueprint("cart", __name__)
 
@@ -34,12 +35,16 @@ def get_cart():
 def add_to_cart():
     # The client only says *what* to add; name, price and image come from
     # the catalog so they cannot be tampered with.
-    data = request.get_json(silent=True) or {}
+    data = json_body()
     product_id = data.get("product_id")
     if not isinstance(product_id, int) or isinstance(product_id, bool):
         return jsonify({"error": "product_id is required"}), 400
 
-    resolved = resolve_cart_item(product_id, data.get("variant"))
+    variant = data.get("variant")
+    if variant is not None and not isinstance(variant, str):
+        return jsonify({"error": "Unknown product or variant"}), 400
+
+    resolved = resolve_cart_item(product_id, variant)
     if resolved is None:
         return jsonify({"error": "Unknown product or variant"}), 400
     name, price, image = resolved

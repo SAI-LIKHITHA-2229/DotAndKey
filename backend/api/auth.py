@@ -9,6 +9,7 @@ from flask import Blueprint, current_app, g, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .db import get_db_connection
+from .validation import json_body, raw_text_field, text_field
 
 bp = Blueprint("auth", __name__)
 
@@ -38,9 +39,9 @@ def login_required(view):
 
 @bp.route("/register", methods=["POST"])
 def register():
-    data = request.get_json(silent=True) or {}
-    username = (data.get("username") or "").strip()
-    password = data.get("password") or ""
+    data = json_body()
+    username = text_field(data, "username")
+    password = raw_text_field(data, "password")
 
     if not USERNAME_PATTERN.fullmatch(username):
         return jsonify({"error": "Username must be 3-30 characters: letters, "
@@ -66,9 +67,9 @@ def register():
 
 @bp.route("/login", methods=["POST"])
 def login():
-    data = request.get_json(silent=True) or {}
-    username = (data.get("username") or "").strip()
-    password = data.get("password") or ""
+    data = json_body()
+    username = text_field(data, "username")
+    password = raw_text_field(data, "password")
 
     with closing(get_db_connection()) as conn:
         user = conn.execute(

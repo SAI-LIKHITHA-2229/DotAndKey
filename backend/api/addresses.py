@@ -1,10 +1,11 @@
 import re
 from contextlib import closing
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify
 
 from .auth import login_required
 from .db import get_db_connection
+from .validation import json_body, text_field
 
 bp = Blueprint("addresses", __name__)
 
@@ -28,21 +29,9 @@ ADDRESS_MAX_LENGTHS = {
 
 def clean_address(data):
     """Return (cleaned_dict, error_message). Exactly one of them is None."""
-    def text(key):
-        value = data.get(key)
-        return value.strip() if isinstance(value, str) else ""
-
-    cleaned = {
-        "full_name": text("full_name"),
-        "mobile": text("mobile"),
-        "pincode": text("pincode"),
-        "flat": text("flat"),
-        "area": text("area"),
-        "landmark": text("landmark"),
-        "city": text("city"),
-        "state": text("state"),
-        "type": text("type") or "Home",
-    }
+    fields = ("full_name", "mobile", "pincode", "flat", "area", "landmark", "city", "state")
+    cleaned = {key: text_field(data, key) for key in fields}
+    cleaned["type"] = text_field(data, "type") or "Home"
 
     for key, limit in ADDRESS_MAX_LENGTHS.items():
         if len(cleaned[key]) > limit:
@@ -91,8 +80,7 @@ def list_addresses():
 @bp.route("/addresses", methods=["POST"])
 @login_required
 def add_address():
-    data = request.get_json(silent=True) or {}
-    cleaned, error = clean_address(data)
+    cleaned, error = clean_address(json_body())
     if error:
         return jsonify({"error": error}), 400
 
@@ -119,8 +107,7 @@ def add_address():
 @bp.route("/addresses/<int:address_id>", methods=["PUT"])
 @login_required
 def update_address(address_id):
-    data = request.get_json(silent=True) or {}
-    cleaned, error = clean_address(data)
+    cleaned, error = clean_address(json_body())
     if error:
         return jsonify({"error": error}), 400
 
