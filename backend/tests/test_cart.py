@@ -71,6 +71,22 @@ def test_increase_decrease_and_remove(client, auth):
     assert client.put("/cart/9999/decrease", headers=auth).status_code == 404
 
 
+def test_cart_uses_current_catalog_price(client, auth, monkeypatch):
+    add(client, auth, product_id=LIP_MASK_ID, variant=None)
+    monkeypatch.setitem(PRODUCTS_BY_ID, LIP_MASK_ID, {**PRODUCTS_BY_ID[LIP_MASK_ID], "price": 450})
+
+    [item] = client.get("/cart", headers=auth).get_json()
+    assert item["price"] == 450
+    assert client.get("/checkout/summary", headers=auth).get_json()["subtotal"] == 450
+
+
+def test_discontinued_products_leave_the_cart(client, auth, monkeypatch):
+    add(client, auth, product_id=LIP_MASK_ID, variant=None)
+    monkeypatch.delitem(PRODUCTS_BY_ID, LIP_MASK_ID)
+
+    assert client.get("/cart", headers=auth).get_json() == []
+
+
 def test_users_cannot_touch_each_others_cart(client, auth):
     add(client, auth)
     [item] = client.get("/cart", headers=auth).get_json()

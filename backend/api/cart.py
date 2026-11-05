@@ -12,22 +12,48 @@ bp = Blueprint("cart", __name__)
 MAX_QUANTITY = 10              # per cart line
 
 
-def get_cart_rows(conn, user_id):
+def cart_lines(conn, user_id):
+    """The user's cart with names, prices and images taken from the catalog.
+
+    The database only stores product_id, variant and quantity, so prices are
+    always current and can never be set by the client. Lines whose product
+    has left the catalog are deleted; the caller commits, so this is safe to
+    use inside a larger transaction such as placing an order.
+    """
     rows = conn.execute(
-        "SELECT product_name, price, quantity, image FROM cart WHERE user_id = ?",
+        "SELECT id, product_id, variant, quantity FROM cart WHERE user_id = ? ORDER BY id",
         (user_id,)
     ).fetchall()
-    return [dict(row) for row in rows]
+
+    lines, gone = [], []
+    for row in rows:
+        resolved = resolve_cart_item(row["product_id"], row["variant"] or None)
+        if resolved is None:
+            gone.append(row["id"])
+            continue
+        name, price, image = resolved
+        lines.append({
+            "id": row["id"],
+            "product_id": row["product_id"],
+            "variant": row["variant"] or None,
+            "product_name": name,
+            "price": price,
+            "image": image,
+            "quantity": row["quantity"],
+        })
+
+    if gone:
+        conn.executemany("DELETE FROM cart WHERE id = ?", [(item_id,) for item_id in gone])
+    return lines
 
 
 @bp.route("/cart")
 @login_required
 def get_cart():
     with closing(get_db_connection()) as conn:
-        items = conn.execute(
-            "SELECT * FROM cart WHERE user_id = ?", (g.user_id,)
-        ).fetchall()
-    return jsonify([dict(item) for item in items])
+        lines = cart_lines(conn, g.user_id)
+        conn.commit()
+    return jsonify(lines)
 
 
 @bp.route("/cart", methods=["POST"])
@@ -44,15 +70,13 @@ def add_to_cart():
     if variant is not None and not isinstance(variant, str):
         return jsonify({"error": "Unknown product or variant"}), 400
 
-    resolved = resolve_cart_item(product_id, variant)
-    if resolved is None:
+    if resolve_cart_item(product_id, variant) is None:
         return jsonify({"error": "Unknown product or variant"}), 400
-    name, price, image = resolved
 
     with closing(get_db_connection()) as conn:
         existing = conn.execute(
-            "SELECT id, quantity FROM cart WHERE product_name = ? AND user_id = ?",
-            (name, g.user_id)
+            "SELECT id, quantity FROM cart WHERE user_id = ? AND product_id = ? AND variant = ?",
+            (g.user_id, product_id, variant or "")
         ).fetchone()
 
         if existing:
@@ -64,9 +88,8 @@ def add_to_cart():
             )
         else:
             conn.execute(
-                "INSERT INTO cart (product_name, price, quantity, image, user_id) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (name, price, 1, image, g.user_id)
+                "INSERT INTO cart (user_id, product_id, variant, quantity) VALUES (?, ?, ?, 1)",
+                (g.user_id, product_id, variant or "")
             )
         conn.commit()
 

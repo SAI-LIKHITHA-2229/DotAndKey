@@ -48,6 +48,32 @@ def test_legacy_database_is_upgraded(tmp_path):
     assert {"idx_cart_user_id", "idx_addresses_user_id", "idx_orders_user_id"} <= indexes
 
 
+def test_tampered_legacy_cart_rows_are_repriced(tmp_path):
+    """A cart row saved with a client-chosen price is charged the catalog price."""
+    path = tmp_path / "legacy.db"
+    make_legacy_db(path)
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE cart ADD COLUMN image TEXT")
+    conn.execute("ALTER TABLE cart ADD COLUMN user_id INTEGER")
+    conn.executemany(
+        "INSERT INTO cart (product_name, price, quantity, user_id) VALUES (?, ?, ?, 1)",
+        [("Lip Mask", 1, 2),                  # real product, fake price
+         ("Something we never sold", 5, 1)],  # unknown -> dropped
+    )
+    conn.commit()
+    conn.close()
+
+    app = create_app({"TESTING": True, "SECRET_KEY": TEST_SECRET, "DATABASE_PATH": str(path)})
+
+    from api.cart import cart_lines
+    from api.db import get_db_connection
+    with app.app_context():
+        lines = cart_lines(get_db_connection(), 1)
+    assert [(line["product_name"], line["price"], line["quantity"]) for line in lines] == [
+        ("Lip Mask", 399, 2)
+    ]
+
+
 def test_migrations_run_once(tmp_path):
     config = {"TESTING": True, "SECRET_KEY": TEST_SECRET, "DATABASE_PATH": str(tmp_path / "x.db")}
     create_app(config)
@@ -63,8 +89,8 @@ def test_foreign_keys_are_enforced(app):
     with app.app_context():
         conn = get_db_connection()
         try:
-            conn.execute("INSERT INTO cart (user_id, product_name, price, quantity) "
-                         "VALUES (12345, 'Ghost', 1, 1)")
+            conn.execute("INSERT INTO cart (user_id, product_id, variant, quantity) "
+                         "VALUES (12345, 6, '', 1)")
             raise AssertionError("insert for a missing user should fail")
         except sqlite3.IntegrityError:
             pass

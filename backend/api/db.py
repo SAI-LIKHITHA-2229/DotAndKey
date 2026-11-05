@@ -140,9 +140,51 @@ def _v2_foreign_keys_and_indexes(conn):
         conn.execute(f"CREATE INDEX idx_{table}_user_id ON {table}(user_id)")
 
 
+def _v3_cart_references_catalog(conn):
+    """Store what was chosen (product_id + variant), not a copy of its price.
+
+    Prices, names and images are looked up in the catalog whenever the cart
+    is read, so a stale or tampered price can never reach checkout. Existing
+    rows are matched to the catalog by name; rows that match nothing are dropped.
+    """
+    from .catalog import PRODUCTS
+
+    names = {}
+    for product in PRODUCTS:
+        variants = product.get("variants") or []
+        if not variants:
+            names[product["name"]] = (product["id"], "")
+        for variant in variants:
+            names[f"{product['name']} ({variant['label']})"] = (product["id"], variant["label"])
+
+    conn.execute("""
+        CREATE TABLE cart_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            product_id INTEGER NOT NULL,
+            variant TEXT NOT NULL DEFAULT '',
+            quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+            UNIQUE (user_id, product_id, variant)
+        )
+    """)
+    for row in conn.execute("SELECT id, user_id, product_name, quantity FROM cart").fetchall():
+        match = names.get(row["product_name"])
+        if match is None:
+            continue
+        conn.execute(
+            "INSERT INTO cart_new (id, user_id, product_id, variant, quantity) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (user_id, product_id, variant) DO UPDATE SET quantity = quantity + excluded.quantity",
+            (row["id"], row["user_id"], match[0], match[1], row["quantity"])
+        )
+    conn.execute("DROP TABLE cart")
+    conn.execute("ALTER TABLE cart_new RENAME TO cart")
+    conn.execute("CREATE INDEX idx_cart_user_id ON cart(user_id)")
+
+
 MIGRATIONS = [
     _v1_initial_schema,
     _v2_foreign_keys_and_indexes,
+    _v3_cart_references_catalog,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 

@@ -6,7 +6,7 @@ from flask import Blueprint, g, jsonify
 
 from .addresses import address_to_text
 from .auth import login_required
-from .cart import get_cart_rows
+from .cart import cart_lines
 from .db import get_db_connection
 from .pricing import (
     DISCOUNT_PERCENT, FREE_GIFT_STEP, FREE_GIFTS, FREE_SHIPPING_MIN, PAYMENT_METHODS,
@@ -22,7 +22,8 @@ bp = Blueprint("orders", __name__)
 @login_required
 def checkout_summary():
     with closing(get_db_connection()) as conn:
-        items = get_cart_rows(conn, g.user_id)
+        items = cart_lines(conn, g.user_id)
+        conn.commit()
 
     subtotal, discount, bill_total = price_cart(items)
     max_gifts = max_gifts_for(bill_total)
@@ -82,7 +83,12 @@ def place_order():
             return jsonify({"error": "Delivery address not found"}), 400
         address_text = address_to_text(dict(address_row))
 
-        items = get_cart_rows(conn, g.user_id)
+        # Snapshot the current catalog price: the order keeps what was paid
+        # even if the catalog changes later.
+        items = [
+            {key: line[key] for key in ("product_name", "price", "quantity", "image")}
+            for line in cart_lines(conn, g.user_id)
+        ]
         if not items:
             return jsonify({"error": "Your cart is empty"}), 400
 
