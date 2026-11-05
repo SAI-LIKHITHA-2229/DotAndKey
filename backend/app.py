@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -9,12 +10,34 @@ from functools import wraps
 import jwt
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-app = Flask(__name__)
-CORS(app)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+log = logging.getLogger(__name__)
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-change-me")
+# ---- Configuration (override with environment variables) ----
+APP_ENV = os.environ.get("APP_ENV", "development")
+DATABASE_PATH = os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "cart.db"))
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if origin.strip()
+]
+TOKEN_HOURS = 12
+
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    if APP_ENV == "production":
+        raise RuntimeError("SECRET_KEY must be set in production")
+    SECRET_KEY = "dev-only-insecure-key-change-me-in-production"
+    log.warning("SECRET_KEY not set; using an insecure development key")
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 32 * 1024   # requests are small JSON bodies
+CORS(app, origins=CORS_ORIGINS)
 
 # ---- Pricing rules (the server is the only place these are decided) ----
 DISCOUNT_PERCENT = 20          # store-wide discount
@@ -64,7 +87,7 @@ MAX_ADDRESSES = 10
 
 def get_db_connection():
     # timeout / busy_timeout: wait for a lock instead of failing or hanging.
-    conn = sqlite3.connect("cart.db", timeout=10)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
@@ -236,6 +259,24 @@ def address_to_text(address):
     parts.append(address["city"])
     parts.append(f"{address['state']} - {address['pincode']}")
     return ", ".join(parts) + f" · Phone: {address['mobile']}"
+
+
+# ---- Errors: always answer with JSON, never an HTML error page ----
+@app.errorhandler(HTTPException)
+def handle_http_error(error):
+    return jsonify({"error": error.description}), error.code
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(_error):
+    log.exception("Unhandled error")
+    return jsonify({"error": "Something went wrong on our side"}), 500
+
+
+# ---- Health check (public) ----
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
 
 
 # ---- Cart ----
@@ -569,7 +610,7 @@ def login():
     if user is None or not check_password_hash(user["password_hash"], password):
         return jsonify({"error": "Invalid username or password"}), 401
 
-    expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=12)
+    expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=TOKEN_HOURS)
     token = jwt.encode(
         {"user_id": user["id"], "username": user["username"], "exp": expires},
         SECRET_KEY,
@@ -579,10 +620,16 @@ def login():
     return jsonify({"token": token, "username": user["username"]}), 200
 
 
+# Create tables on startup, however the app is launched
+# (python app.py, flask run, gunicorn or the test suite).
+init_db()
+
+
 if __name__ == "__main__":
-    init_db()
+    logging.basicConfig(level=logging.INFO)
     # threaded=True   -> handle requests concurrently.
     # use_reloader=False -> the auto-reloader restarts the app on every file
     #   save (yours or the editor's) and its half-killed processes are what
     #   kept wedging the server. Restart manually after editing app.py.
-    app.run(port=5001, threaded=True, debug=False, use_reloader=False)
+    app.run(port=int(os.environ.get("PORT", 5001)), threaded=True,
+            debug=False, use_reloader=False)
