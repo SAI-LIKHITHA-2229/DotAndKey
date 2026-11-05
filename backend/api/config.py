@@ -41,6 +41,7 @@ def load_config(overrides=None):
             "SESSION_COOKIE_SECURE", "true" if app_env == "production" else "false"
         ).lower() == "true",
         "MAX_CONTENT_LENGTH": 32 * 1024,   # requests are small JSON bodies
+        "TRUST_PROXY": int(os.environ.get("TRUST_PROXY", "0")),
         "RATELIMIT_ENABLED": os.environ.get("RATELIMIT_ENABLED", "true").lower() != "false",
         "RATELIMIT_STORAGE_URI": os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
     }

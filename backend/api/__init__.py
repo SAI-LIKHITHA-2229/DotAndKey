@@ -9,6 +9,7 @@ from . import addresses, auth, cart, catalog, orders
 from .config import load_config
 from .db import init_db
 from .extensions import limiter
+from .security import init_security
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ def create_app(overrides=None):
     # the API; credentials let the session cookie through for those origins.
     CORS(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)
     limiter.init_app(app)
+    init_security(app)
 
     for module in (auth, catalog, cart, addresses, orders):
         app.register_blueprint(module.bp)
