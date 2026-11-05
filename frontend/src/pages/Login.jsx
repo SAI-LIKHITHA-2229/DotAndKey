@@ -67,6 +67,7 @@ function Login() {
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
               autoCapitalize="none"
+              maxLength={30}
               required
             />
           </label>

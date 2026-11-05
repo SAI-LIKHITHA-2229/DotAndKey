@@ -83,6 +83,16 @@ INDIAN_STATES = [
 ]
 ADDRESS_TYPES = ["Home", "Work", "Other"]
 MAX_ADDRESSES = 10
+ADDRESS_MAX_LENGTHS = {
+    "full_name": 60, "flat": 120, "area": 120, "landmark": 120, "city": 60,
+}
+
+# ---- Account rules ----
+USERNAME_PATTERN = re.compile(r"[A-Za-z0-9_.]{3,30}")
+PASSWORD_MIN, PASSWORD_MAX = 8, 128
+
+# ---- Cart rules ----
+MAX_QUANTITY = 10              # per cart line
 
 
 # ---- Product catalog (the server decides names, prices and images) ----
@@ -262,6 +272,10 @@ def clean_address(data):
         "type": text("type") or "Home",
     }
 
+    for key, limit in ADDRESS_MAX_LENGTHS.items():
+        if len(cleaned[key]) > limit:
+            return None, f"{key.replace('_', ' ').capitalize()} is too long (max {limit} characters)"
+
     if len(cleaned["full_name"]) < 2:
         return None, "Enter your full name"
     if not re.fullmatch(r"[6-9]\d{9}", cleaned["mobile"]):
@@ -342,11 +356,13 @@ def add_to_cart():
 
     with closing(get_db_connection()) as conn:
         existing = conn.execute(
-            "SELECT id FROM cart WHERE product_name = ? AND user_id = ?",
+            "SELECT id, quantity FROM cart WHERE product_name = ? AND user_id = ?",
             (name, g.user_id)
         ).fetchone()
 
         if existing:
+            if existing["quantity"] >= MAX_QUANTITY:
+                return jsonify({"error": f"You can add up to {MAX_QUANTITY} of an item"}), 400
             conn.execute(
                 "UPDATE cart SET quantity = quantity + 1 WHERE id = ?",
                 (existing["id"],)
@@ -400,9 +416,18 @@ def decrease_quantity(item_id):
 @login_required
 def increase_quantity(item_id):
     with closing(get_db_connection()) as conn:
-        conn.execute(
-            "UPDATE cart SET quantity = quantity + 1 WHERE id = ? AND user_id = ?",
+        item = conn.execute(
+            "SELECT quantity FROM cart WHERE id = ? AND user_id = ?",
             (item_id, g.user_id)
+        ).fetchone()
+
+        if item is None:
+            return jsonify({"error": "Item not found"}), 404
+        if item["quantity"] >= MAX_QUANTITY:
+            return jsonify({"error": f"You can add up to {MAX_QUANTITY} of an item"}), 400
+
+        conn.execute(
+            "UPDATE cart SET quantity = quantity + 1 WHERE id = ?", (item_id,)
         )
         conn.commit()
     return jsonify({"message": "Quantity updated"}), 200
@@ -617,10 +642,12 @@ def register():
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
 
-    if len(username) < 3:
-        return jsonify({"error": "Username must be at least 3 characters"}), 400
-    if len(password) < 8:
-        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    if not USERNAME_PATTERN.fullmatch(username):
+        return jsonify({"error": "Username must be 3-30 characters: letters, "
+                                 "numbers, dots or underscores"}), 400
+    if not PASSWORD_MIN <= len(password) <= PASSWORD_MAX:
+        return jsonify({"error": f"Password must be {PASSWORD_MIN}-{PASSWORD_MAX} "
+                                 "characters"}), 400
 
     password_hash = generate_password_hash(password)
 
