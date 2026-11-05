@@ -311,7 +311,8 @@ function Cart() {
           {formVisible ? (
             <AddressForm
               onSave={handleSaveAddress}
-              onCancel={() => setShowForm(false)}
+              // With no saved address there is nothing to go back to.
+              onCancel={addresses.length > 0 ? () => setShowForm(false) : undefined}
             />
           ) : (
             <button

@@ -44,7 +44,7 @@ function validate(values) {
 
 // initial: an existing address (when editing) or nothing (when adding).
 // onSave:  async function that receives the form values.
-// onCancel: called when the user clicks Cancel.
+// onCancel: called when the user clicks Cancel (no Cancel button if omitted).
 function AddressForm({ initial, onSave, onCancel }) {
   const [values, setValues] = useState(() => ({ ...EMPTY, ...initial }))
   const [error, setError] = useState('')
@@ -177,9 +177,11 @@ function AddressForm({ initial, onSave, onCancel }) {
       <button type="submit" className="checkout-btn" disabled={saving}>
         {saving ? 'Saving...' : 'Save address'}
       </button>
-      <button type="button" className="remove-btn" onClick={onCancel}>
-        Cancel
-      </button>
+      {onCancel && (
+        <button type="button" className="remove-btn" onClick={onCancel}>
+          Cancel
+        </button>
+      )}
     </form>
   )
 }
