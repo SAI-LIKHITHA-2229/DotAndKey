@@ -43,9 +43,12 @@ logs/
 **/.vscode/*
 !**/.vscode/extensions.json
 .idea/
-*.swp
-*.swo
+*.sw?
 *~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
 .DS_Store
 Thumbs.db
 desktop.ini
