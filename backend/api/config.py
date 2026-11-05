@@ -7,11 +7,15 @@ DEV_SECRET_KEY = "dev-only-insecure-key-change-me-in-production"
 log = logging.getLogger(__name__)
 
 
-def load_config():
-    """Build the app configuration from environment variables."""
-    app_env = os.environ.get("APP_ENV", "development")
+def load_config(overrides=None):
+    """Build the app configuration from environment variables.
 
-    secret_key = os.environ.get("SECRET_KEY")
+    `overrides` (used by tests) wins over the environment.
+    """
+    overrides = overrides or {}
+    app_env = overrides.get("APP_ENV") or os.environ.get("APP_ENV", "development")
+
+    secret_key = overrides.get("SECRET_KEY") or os.environ.get("SECRET_KEY")
     if not secret_key:
         if app_env == "production":
             raise RuntimeError("SECRET_KEY must be set in production")
@@ -26,7 +30,7 @@ def load_config():
         if origin.strip()
     ]
 
-    return {
+    config = {
         "APP_ENV": app_env,
         "SECRET_KEY": secret_key,
         "DATABASE_PATH": os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "cart.db")),
@@ -34,3 +38,5 @@ def load_config():
         "TOKEN_HOURS": 12,
         "MAX_CONTENT_LENGTH": 32 * 1024,   # requests are small JSON bodies
     }
+    config.update(overrides)
+    return config

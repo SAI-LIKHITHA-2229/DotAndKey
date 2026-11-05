@@ -15,8 +15,7 @@ log = logging.getLogger(__name__)
 def create_app(overrides=None):
     """Create the Flask app. `overrides` replaces config values (used by tests)."""
     app = Flask(__name__)
-    app.config.update(load_config())
-    app.config.update(overrides or {})
+    app.config.update(load_config(overrides))
 
     CORS(app, origins=app.config["CORS_ORIGINS"])
 
