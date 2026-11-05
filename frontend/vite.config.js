@@ -17,4 +17,9 @@ export default defineConfig({
   plugins: [react()],
   server: { proxy: apiProxy },
   preview: { proxy: apiProxy },
+  // Vitest: component tests run in a simulated browser (jsdom).
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+  },
 })
