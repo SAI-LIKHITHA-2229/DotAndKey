@@ -22,21 +22,73 @@ PASSWORD_MIN, PASSWORD_MAX = 8, 128
 # time either way and can't reveal which usernames are registered.
 DUMMY_PASSWORD_HASH = generate_password_hash("not-a-real-password")
 
+# ---- Sessions ----
+# Browsers keep the JWT in an httpOnly cookie that page JavaScript cannot
+# read, so a script injected into the page cannot steal it. API clients
+# (curl, Postman, mobile apps) may send it as "Authorization: Bearer <jwt>".
+SESSION_COOKIE = "dk_session"
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+CSRF_HEADER = "X-Requested-With"
+
+
+def _issue_token(user):
+    expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        hours=current_app.config["TOKEN_HOURS"]
+    )
+    token = jwt.encode(
+        {"user_id": user["id"], "username": user["username"],
+         "ver": user["token_version"], "exp": expires},
+        current_app.config["SECRET_KEY"],
+        algorithm="HS256",
+    )
+    return token, expires
+
+
+def _authenticate():
+    """Return (user_row, token_payload, from_cookie) or (None, error_message, None)."""
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        token, from_cookie = header[len("Bearer "):], False
+    else:
+        token, from_cookie = request.cookies.get(SESSION_COOKIE), True
+    if not token:
+        return None, "Login required", None
+
+    try:
+        payload = jwt.decode(token, current_app.config["SECRET_KEY"], algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        return None, "Your session has expired. Please sign in again.", None
+
+    with closing(get_db_connection()) as conn:
+        user = conn.execute(
+            "SELECT id, username, token_version FROM users WHERE id = ?",
+            (payload.get("user_id"),)
+        ).fetchone()
+
+    # The user must still exist and must not have logged out since the
+    # token was issued (logout bumps token_version).
+    if user is None or user["token_version"] != payload.get("ver"):
+        return None, "Your session has ended. Please sign in again.", None
+    return user, payload, from_cookie
+
 
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        header = request.headers.get("Authorization", "")
-        if not header.startswith("Bearer "):
-            return jsonify({"error": "Login required"}), 401
+        user, payload, from_cookie = _authenticate()
+        if user is None:
+            return jsonify({"error": payload}), 401
 
-        token = header[len("Bearer "):]
-        try:
-            payload = jwt.decode(token, current_app.config["SECRET_KEY"], algorithms=["HS256"])
-        except jwt.InvalidTokenError:
-            return jsonify({"error": "Invalid or expired token"}), 401
+        # Cookies are sent automatically, so a write authenticated by cookie
+        # must also carry a custom header. Other sites cannot add one without
+        # passing CORS, which blocks cross-site request forgery.
+        if from_cookie and request.method not in SAFE_METHODS \
+                and request.headers.get(CSRF_HEADER) != "XMLHttpRequest":
+            return jsonify({"error": f"Missing {CSRF_HEADER} header"}), 403
 
-        g.user_id = payload["user_id"]
+        g.user_id = user["id"]
+        g.username = user["username"]
+        g.token_expires = datetime.datetime.fromtimestamp(payload["exp"], datetime.timezone.utc)
         return view(*args, **kwargs)
 
     return wrapped
@@ -80,7 +132,7 @@ def login():
 
     with closing(get_db_connection()) as conn:
         user = conn.execute(
-            "SELECT id, username, password_hash FROM users WHERE username = ?",
+            "SELECT id, username, password_hash, token_version FROM users WHERE username = ?",
             (username,)
         ).fetchone()
 
@@ -89,13 +141,37 @@ def login():
     if user is None or not password_ok:
         return jsonify({"error": "Invalid username or password"}), 401
 
-    expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
-        hours=current_app.config["TOKEN_HOURS"]
+    token, expires = _issue_token(user)
+    response = jsonify({"username": user["username"], "expires_at": expires.isoformat()})
+    response.set_cookie(
+        SESSION_COOKIE, token,
+        max_age=current_app.config["TOKEN_HOURS"] * 3600,
+        httponly=True,                                    # unreadable by page JavaScript
+        secure=current_app.config["SESSION_COOKIE_SECURE"],
+        samesite="Lax",                                   # not sent on cross-site POSTs
+        path="/",
     )
-    token = jwt.encode(
-        {"user_id": user["id"], "username": user["username"], "exp": expires},
-        current_app.config["SECRET_KEY"],
-        algorithm="HS256",
-    )
+    return response, 200
 
-    return jsonify({"token": token, "username": user["username"]}), 200
+
+@bp.route("/me")
+@login_required
+def me():
+    return jsonify({"username": g.username, "expires_at": g.token_expires.isoformat()})
+
+
+@bp.route("/logout", methods=["POST"])
+def logout():
+    # Ending the session server-side: bumping token_version invalidates this
+    # token and any copies of it, on every device.
+    user, _, _ = _authenticate()
+    if user is not None:
+        with closing(get_db_connection()) as conn:
+            conn.execute(
+                "UPDATE users SET token_version = token_version + 1 WHERE id = ?", (user["id"],)
+            )
+            conn.commit()
+
+    response = jsonify({"message": "Logged out"})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response, 200

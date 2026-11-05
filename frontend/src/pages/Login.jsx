@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 function Login() {
-  const { isLoggedIn, login, register } = useAuth()
+  const { isLoggedIn, checking, login, register } = useAuth()
 
   const [mode, setMode] = useState('signin')
   const [username, setUsername] = useState('')
@@ -13,6 +13,8 @@ function Login() {
   const [submitting, setSubmitting] = useState(false)
 
   const isSignup = mode === 'signup'
+
+  if (checking) return null
 
   if (isLoggedIn) {
     return <Navigate to="/" replace />

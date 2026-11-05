@@ -29,10 +29,17 @@ def client(app):
 
 
 def make_user(client, username="alice", password="password123"):
-    """Register and log in; return the Authorization header."""
+    """Register and log in; return a Bearer header for that user.
+
+    Login sets an httpOnly session cookie. Tests that juggle several users
+    copy the token into a header and drop the cookie, so each request says
+    exactly who is making it.
+    """
     client.post("/register", json={"username": username, "password": password})
-    response = client.post("/login", json={"username": username, "password": password})
-    return {"Authorization": f"Bearer {response.get_json()['token']}"}
+    client.post("/login", json={"username": username, "password": password})
+    token = client.get_cookie("dk_session").value
+    client.delete_cookie("dk_session")
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture

@@ -18,7 +18,9 @@ def create_app(overrides=None):
     app = Flask(__name__)
     app.config.update(load_config(overrides))
 
-    CORS(app, origins=app.config["CORS_ORIGINS"])
+    # Only needed when the frontend is served from a different origin than
+    # the API; credentials let the session cookie through for those origins.
+    CORS(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)
     limiter.init_app(app)
 
     for module in (auth, catalog, cart, addresses, orders):

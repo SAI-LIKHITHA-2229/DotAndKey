@@ -181,10 +181,16 @@ def _v3_cart_references_catalog(conn):
     conn.execute("CREATE INDEX idx_cart_user_id ON cart(user_id)")
 
 
+def _v4_token_version(conn):
+    """Bumping a user's token_version invalidates every token issued before."""
+    conn.execute("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
+
+
 MIGRATIONS = [
     _v1_initial_schema,
     _v2_foreign_keys_and_indexes,
     _v3_cart_references_catalog,
+    _v4_token_version,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
