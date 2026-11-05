@@ -6,6 +6,7 @@ import Shop from './pages/Shop'
 import Cart from './pages/Cart'
 import Account from './pages/Account'
 import Login from './pages/Login'
+import Payment from './pages/Payment'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
         <Route path="/" element={<RequireAuth><Home /></RequireAuth>} />
         <Route path="/shop" element={<RequireAuth><Shop /></RequireAuth>} />
         <Route path="/cart" element={<RequireAuth><Cart /></RequireAuth>} />
+        <Route path="/payment" element={<RequireAuth><Payment /></RequireAuth>} />
         <Route path="/account" element={<RequireAuth><Account /></RequireAuth>} />
       </Routes>
     </>

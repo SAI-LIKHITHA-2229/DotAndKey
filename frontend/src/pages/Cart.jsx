@@ -1,93 +1,123 @@
 import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   getCart,
+  getCheckoutSummary,
   increaseItem,
   decreaseItem,
   removeItem,
   placeOrder,
 } from '../api/cart'
 
-const DISCOUNT_PERCENT = 20
-const PAYMENT_METHODS = ['Cash on Delivery', 'UPI', 'Credit / Debit Card']
+// Fetch the cart and the server's checkout numbers together.
+async function fetchAll() {
+  const [items, summary] = await Promise.all([getCart(), getCheckoutSummary()])
+  return { items, summary }
+}
 
 function Cart() {
+  const navigate = useNavigate()
+
   const [items, setItems] = useState([])
+  const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [address, setAddress] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0])
-  const [placing, setPlacing] = useState(false)
-  const [orderMessage, setOrderMessage] = useState('')
 
+  const [address, setAddress] = useState('')
+  const [methodId, setMethodId] = useState('cod')
+  const [option, setOption] = useState('')
+  const [selectedGifts, setSelectedGifts] = useState([])
+
+  const [placing, setPlacing] = useState(false)
+  const [placedOrder, setPlacedOrder] = useState(null)
+
+  // Save fresh data into state. If the cart shrank, keep only as many
+  // gifts as the server now allows.
+  function applyData({ items, summary }) {
+    setItems(items)
+    setSummary(summary)
+    setSelectedGifts((current) => current.slice(0, summary.gifts.max))
+    setError('')
+  }
+
+  // Load once when the page opens.
   useEffect(() => {
     let ignore = false
 
-    async function fetchCart() {
-      try {
-        const data = await getCart()
-        if (!ignore) {
-          setItems(data)
-          setError('')
-        }
-      } catch (err) {
+    fetchAll()
+      .then((data) => {
+        if (!ignore) applyData(data)
+      })
+      .catch((err) => {
         console.error(err)
-        if (!ignore) {
-          setError("Couldn't load your cart. Is the server running?")
-        }
-      } finally {
-        if (!ignore) {
-          setLoading(false)
-        }
-      }
-    }
-
-    fetchCart()
+        if (!ignore) setError("Couldn't load your cart. Is the server running?")
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
 
     return () => {
       ignore = true
     }
   }, [])
 
-  async function refreshCart() {
-    const data = await getCart()
-    setItems(data)
-  }
-
+  // Load again after +, - or Remove.
   async function changeItem(action, id) {
     try {
       await action(id)
-      await refreshCart()
-      setError('')
+      applyData(await fetchAll())
     } catch (err) {
       console.error(err)
       setError('Something went wrong. Please try again.')
     }
   }
 
+  function chooseMethod(method) {
+    setMethodId(method.id)
+    setOption(method.options[0] || '')
+  }
+
+  function toggleGift(name) {
+    setSelectedGifts((current) => {
+      if (current.includes(name)) {
+        return current.filter((g) => g !== name)
+      }
+      if (current.length >= summary.gifts.max) {
+        return current
+      }
+      return [...current, name]
+    })
+  }
+
   async function handlePlaceOrder(event) {
     event.preventDefault()
-    setError('')
+    const method = summary.methods.find((m) => m.id === methodId)
+
+    const order = {
+      address: address.trim(),
+      paymentMethod: method.id,
+      paymentOption: option,
+      gifts: selectedGifts,
+    }
+
+    // Prepaid methods go to the PIN page first (built in the next step).
+    if (method.prepaid) {
+      navigate('/payment', { state: order })
+      return
+    }
+
     setPlacing(true)
+    setError('')
     try {
-      const result = await placeOrder(address.trim(), paymentMethod)
-      setOrderMessage(
-        `Order #${result.order_id} placed! Total: ₹${result.total} 🎉`
-      )
-      setAddress('')
-      await refreshCart()
+      const result = await placeOrder(order)
+      setPlacedOrder(result)
     } catch (err) {
+      console.error(err)
       setError(err.message)
     } finally {
       setPlacing(false)
     }
   }
-
-  const subtotal = items.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  )
-  const discount = Math.round((subtotal * DISCOUNT_PERCENT) / 100)
-  const total = subtotal - discount
 
   if (loading) {
     return (
@@ -97,11 +127,26 @@ function Cart() {
     )
   }
 
+  if (placedOrder) {
+    return (
+      <section className="cart-section">
+        <div className="order-success-card">
+          <h2>Order placed 🎉</h2>
+          <p>
+            Order #{placedOrder.order_id} • ₹{placedOrder.total}
+          </p>
+          <Link to="/account">View my orders</Link>
+        </div>
+      </section>
+    )
+  }
+
+  const method = summary?.methods.find((m) => m.id === methodId)
+
   return (
     <section className="cart-section">
       <h2>Your Cart</h2>
-      {orderMessage && <p className="cart-empty-msg">{orderMessage}</p>}
-      {error && <p className="auth-error">{error}</p>}
+      {error && <p>{error}</p>}
 
       {items.length === 0 ? (
         <p>Your cart is empty.</p>
@@ -142,17 +187,62 @@ function Cart() {
           <p id="cartTotal">
             <span className="bill-row">
               <span>Subtotal</span>
-              <span>₹{subtotal}</span>
+              <span>₹{summary.subtotal}</span>
             </span>
             <span className="bill-row bill-discount">
-              <span>Discount ({DISCOUNT_PERCENT}% off)</span>
-              <span>− ₹{discount}</span>
+              <span>Discount ({summary.discount_percent}% off)</span>
+              <span>− ₹{summary.discount}</span>
             </span>
+            {method.prepaid && (
+              <span className="bill-row bill-discount">
+                <span>Prepaid extra ({summary.prepaid_percent}% off)</span>
+                <span>− ₹{method.discount}</span>
+              </span>
+            )}
             <span className="bill-row bill-grand">
               <span>Total payable</span>
-              <span>₹{total}</span>
+              <span>₹{method.total}</span>
             </span>
           </p>
+
+          {/* Free shipping message */}
+          <div className="free-shipping">
+            {summary.free_shipping
+              ? '🎉 Woohoo! Free shipping on this order'
+              : `Add ₹${summary.free_shipping_remaining} more to unlock free shipping`}
+          </div>
+
+          {/* Free gifts */}
+          <div className="free-gifts">
+            <div className="free-gifts-head">
+              {summary.gifts.all_unlocked
+                ? '🎁 All free gifts unlocked and added to your order!'
+                : summary.gifts.max === 0
+                  ? `🎁 Add ₹${summary.gifts.next_unlock_in} more to unlock your first free gift`
+                  : `🎁 Choose ${summary.gifts.max} free gift${summary.gifts.max > 1 ? 's' : ''} (${selectedGifts.length}/${summary.gifts.max} selected). Add ₹${summary.gifts.next_unlock_in} more for one more.`}
+            </div>
+
+            <div className="free-gifts-list">
+              {summary.gifts.available.map((gift) => {
+                const chosen =
+                  summary.gifts.all_unlocked || selectedGifts.includes(gift.name)
+                const locked = summary.gifts.max === 0
+
+                return (
+                  <button
+                    type="button"
+                    key={gift.name}
+                    className={`gift-pill${chosen ? ' selected' : ''}`}
+                    disabled={locked || summary.gifts.all_unlocked}
+                    onClick={() => toggleGift(gift.name)}
+                  >
+                    <img src={`/images/${gift.image}`} alt="" width="36" />
+                    <span>{gift.name}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
 
           <form onSubmit={handlePlaceOrder}>
             <label className="auth-field">
@@ -166,22 +256,57 @@ function Cart() {
               />
             </label>
 
-            <label className="auth-field">
-              <span>Payment method</span>
-              <select
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-              >
-                {PAYMENT_METHODS.map((method) => (
-                  <option key={method} value={method}>
-                    {method}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {/* Payment methods */}
+            <div className="payment-options">
+              {summary.methods.map((m) => (
+                <label className="pay-option" key={m.id}>
+                  <input
+                    type="radio"
+                    name="payment"
+                    checked={m.id === methodId}
+                    onChange={() => chooseMethod(m)}
+                  />
+                  <span>
+                    <strong>{m.title}</strong>
+                    <br />
+                    <small>{m.sub}</small>
+                    {m.prepaid && (
+                      <>
+                        <br />
+                        <small className="prepaid-note">
+                          ✨ Extra {summary.prepaid_percent}% off on prepaid payment
+                        </small>
+                      </>
+                    )}
+                  </span>
+                  <span>₹{m.total}</span>
+                </label>
+              ))}
+            </div>
+
+            {method.options.length > 0 && (
+              <label className="auth-field">
+                <span>Choose {method.title}</span>
+                <select
+                  className="pay-select"
+                  value={option || method.options[0]}
+                  onChange={(e) => setOption(e.target.value)}
+                >
+                  {method.options.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <button type="submit" className="checkout-btn" disabled={placing}>
-              {placing ? 'Placing order...' : `Place order • ₹${total}`}
+              {placing
+                ? 'Placing order...'
+                : method.prepaid
+                  ? `Pay • ₹${method.total}`
+                  : `Place order • ₹${method.total}`}
             </button>
           </form>
         </>
