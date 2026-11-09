@@ -2,9 +2,21 @@ import logging
 import sqlite3
 from contextlib import closing
 
+import psycopg
 from flask import current_app
+from psycopg.rows import dict_row
 
 log = logging.getLogger(__name__)
+
+
+def get_pg_connection():
+    """Open a new PostgreSQL connection. The caller must close it."""
+    url = current_app.config["DATABASE_URL"]
+    if not url:
+        raise RuntimeError("DATABASE_URL is not set")
+    # dict_row: read columns by name, as in row["id"].
+    # connect_timeout: give up after 10 seconds instead of hanging.
+    return psycopg.connect(url, row_factory=dict_row, connect_timeout=10)
 
 
 def get_db_connection():
