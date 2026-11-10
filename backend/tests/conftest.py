@@ -5,11 +5,13 @@ from urllib.parse import urlsplit
 import psycopg
 import pytest
 from dotenv import load_dotenv
+from psycopg.rows import dict_row
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 
 from api import create_app  # noqa: E402
+from api.db import create_schema  # noqa: E402
 
 TEST_SECRET = "test-secret-key-that-is-at-least-32-bytes"
 TEST_DATABASE_NAME = "dotandkey_test"
@@ -44,9 +46,22 @@ require_test_database(TEST_URL)
 os.environ["DATABASE_URL"] = TEST_URL
 
 
+def connect_to_test_database():
+    return psycopg.connect(TEST_URL, row_factory=dict_row, connect_timeout=10)
+
+
+def rebuild_test_schema():
+    """Erase everything in the test database and create the tables again."""
+    require_test_database(TEST_URL)
+    with connect_to_test_database() as conn:
+        conn.execute("DROP SCHEMA public CASCADE")
+        conn.execute("CREATE SCHEMA public")
+        create_schema(conn)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def prepare_test_database():
-    """Create the test database the first time the tests run."""
+    """Create the test database if needed and start from fresh tables."""
     admin_url = with_database(TEST_URL, "postgres")
     # CREATE DATABASE cannot run inside a transaction, so autocommit is on.
     with psycopg.connect(admin_url, autocommit=True, connect_timeout=10) as conn:
@@ -55,6 +70,17 @@ def prepare_test_database():
         ).fetchone()
         if found is None:
             conn.execute(f"CREATE DATABASE {TEST_DATABASE_NAME}")
+    rebuild_test_schema()
+
+
+@pytest.fixture(autouse=True)
+def clean_database(prepare_test_database):
+    """Every test starts with empty tables and ids counting from 1."""
+    require_test_database(TEST_URL)
+    with connect_to_test_database() as conn:
+        # Fail clearly instead of waiting forever if a connection was left open.
+        conn.execute("SET lock_timeout = '5s'")
+        conn.execute("TRUNCATE users, cart, addresses, orders RESTART IDENTITY CASCADE")
 
 
 @pytest.fixture

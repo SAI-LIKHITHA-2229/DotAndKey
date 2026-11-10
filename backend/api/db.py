@@ -19,6 +19,69 @@ def get_pg_connection():
     return psycopg.connect(url, row_factory=dict_row, connect_timeout=10)
 
 
+# Each statement is safe to repeat, so the whole list runs on every start.
+SCHEMA = (
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        username TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        token_version INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    # Usernames are unique ignoring case: Alice and alice are the same person.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (lower(username))",
+    """
+    CREATE TABLE IF NOT EXISTS cart (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL,
+        variant TEXT NOT NULL DEFAULT '',
+        quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+        UNIQUE (user_id, product_id, variant)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS addresses (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        full_name TEXT NOT NULL,
+        mobile TEXT NOT NULL,
+        pincode TEXT NOT NULL,
+        flat TEXT NOT NULL,
+        area TEXT NOT NULL,
+        landmark TEXT,
+        city TEXT NOT NULL,
+        state TEXT NOT NULL,
+        type TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_addresses_user_id ON addresses (user_id)",
+    # RESTRICT: a user who has orders can't be deleted, so history is never lost.
+    """
+    CREATE TABLE IF NOT EXISTS orders (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        items TEXT NOT NULL,
+        total INTEGER NOT NULL,
+        address TEXT,
+        payment_method TEXT,
+        status TEXT NOT NULL DEFAULT 'confirmed'
+            CHECK (status IN ('confirmed', 'shipped', 'delivered', 'cancelled')),
+        payment_status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (payment_status IN ('pending', 'demo_paid')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders (user_id)",
+)
+
+
+def create_schema(conn):
+    for statement in SCHEMA:
+        conn.execute(statement)
+
+
 def get_db_connection():
     # timeout / busy_timeout: wait for a lock instead of failing or hanging.
     conn = sqlite3.connect(current_app.config["DATABASE_PATH"], timeout=10)
