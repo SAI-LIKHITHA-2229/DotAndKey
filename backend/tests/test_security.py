@@ -15,9 +15,8 @@ def test_user_data_is_not_cached(client, auth):
     assert "Cache-Control" not in client.get("/products").headers
 
 
-def test_production_adds_hsts_and_secure_cookies(tmp_path):
+def test_production_adds_hsts_and_secure_cookies():
     app = create_app({"APP_ENV": "production", "SECRET_KEY": TEST_SECRET,
-                      "DATABASE_PATH": str(tmp_path / "prod.db"),
                       "SESSION_COOKIE_SECURE": True, "RATELIMIT_ENABLED": False})
     client = app.test_client()
     assert "max-age=" in client.get("/health").headers["Strict-Transport-Security"]

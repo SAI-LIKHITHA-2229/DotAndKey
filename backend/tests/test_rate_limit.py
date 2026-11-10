@@ -6,11 +6,10 @@ from conftest import TEST_SECRET
 
 
 @pytest.fixture
-def limited_client(tmp_path):
+def limited_client():
     app = create_app({
         "TESTING": True,
         "SECRET_KEY": TEST_SECRET,
-        "DATABASE_PATH": str(tmp_path / "limits.db"),
         "RATELIMIT_ENABLED": True,
     })
     with app.app_context():

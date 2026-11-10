@@ -38,7 +38,6 @@ def load_config(overrides=None):
     config = {
         "APP_ENV": app_env,
         "SECRET_KEY": secret_key,
-        "DATABASE_PATH": os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "cart.db")),
         "DATABASE_URL": os.environ.get("DATABASE_URL", ""),   # contains a password: never log it
         "CORS_ORIGINS": cors_origins,
         "TOKEN_HOURS": 12,

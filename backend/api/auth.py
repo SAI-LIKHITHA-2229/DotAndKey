@@ -1,10 +1,10 @@
 import datetime
 import re
-import sqlite3
 from contextlib import closing
 from functools import wraps
 
 import jwt
+import psycopg
 from flask import Blueprint, current_app, g, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -61,7 +61,7 @@ def _authenticate():
 
     with closing(get_db_connection()) as conn:
         user = conn.execute(
-            "SELECT id, username, token_version FROM users WHERE id = ?",
+            "SELECT id, username, token_version FROM users WHERE id = %s",
             (payload.get("user_id"),)
         ).fetchone()
 
@@ -113,11 +113,11 @@ def register():
     try:
         with closing(get_db_connection()) as conn:
             conn.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
                 (username, password_hash)
             )
             conn.commit()
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
         return jsonify({"error": "Username already taken"}), 409
 
     return jsonify({"message": "Account created"}), 201
@@ -133,7 +133,7 @@ def login():
     with closing(get_db_connection()) as conn:
         user = conn.execute(
             "SELECT id, username, password_hash, token_version FROM users "
-            "WHERE lower(username) = lower(?)",
+            "WHERE lower(username) = lower(%s)",
             (username,)
         ).fetchone()
 
@@ -169,7 +169,7 @@ def logout():
     if user is not None:
         with closing(get_db_connection()) as conn:
             conn.execute(
-                "UPDATE users SET token_version = token_version + 1 WHERE id = ?", (user["id"],)
+                "UPDATE users SET token_version = token_version + 1 WHERE id = %s", (user["id"],)
             )
             conn.commit()
 

@@ -84,12 +84,11 @@ def clean_database(prepare_test_database):
 
 
 @pytest.fixture
-def app(tmp_path):
-    """A fresh app backed by an empty temporary database for every test."""
+def app():
+    """A fresh app for every test, using the emptied test database."""
     return create_app({
         "TESTING": True,
         "SECRET_KEY": TEST_SECRET,
-        "DATABASE_PATH": str(tmp_path / "test.db"),
         # Most tests log in many times; the rate-limit test turns it back on.
         "RATELIMIT_ENABLED": False,
     })

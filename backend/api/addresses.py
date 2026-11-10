@@ -73,7 +73,7 @@ def address_to_text(address):
 def list_addresses():
     with closing(get_db_connection()) as conn:
         rows = conn.execute(
-            f"SELECT {ADDRESS_COLUMNS} FROM addresses WHERE user_id = ? ORDER BY id DESC",
+            f"SELECT {ADDRESS_COLUMNS} FROM addresses WHERE user_id = %s ORDER BY id DESC",
             (g.user_id,)
         ).fetchall()
     return jsonify([dict(row) for row in rows])
@@ -88,14 +88,14 @@ def add_address():
 
     with closing(get_db_connection()) as conn:
         count = conn.execute(
-            "SELECT COUNT(*) AS n FROM addresses WHERE user_id = ?", (g.user_id,)
+            "SELECT COUNT(*) AS n FROM addresses WHERE user_id = %s", (g.user_id,)
         ).fetchone()["n"]
         if count >= MAX_ADDRESSES:
             return jsonify({"error": f"You can save up to {MAX_ADDRESSES} addresses"}), 400
 
         new_id = conn.execute(
             "INSERT INTO addresses (user_id, full_name, mobile, pincode, flat, "
-            "area, landmark, city, state, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "area, landmark, city, state, type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "RETURNING id",
             (g.user_id, cleaned["full_name"], cleaned["mobile"], cleaned["pincode"],
              cleaned["flat"], cleaned["area"], cleaned["landmark"], cleaned["city"],
@@ -115,9 +115,9 @@ def update_address(address_id):
 
     with closing(get_db_connection()) as conn:
         cursor = conn.execute(
-            "UPDATE addresses SET full_name = ?, mobile = ?, pincode = ?, flat = ?, "
-            "area = ?, landmark = ?, city = ?, state = ?, type = ? "
-            "WHERE id = ? AND user_id = ?",
+            "UPDATE addresses SET full_name = %s, mobile = %s, pincode = %s, flat = %s, "
+            "area = %s, landmark = %s, city = %s, state = %s, type = %s "
+            "WHERE id = %s AND user_id = %s",
             (cleaned["full_name"], cleaned["mobile"], cleaned["pincode"],
              cleaned["flat"], cleaned["area"], cleaned["landmark"], cleaned["city"],
              cleaned["state"], cleaned["type"], address_id, g.user_id)
@@ -134,7 +134,7 @@ def update_address(address_id):
 def delete_address(address_id):
     with closing(get_db_connection()) as conn:
         conn.execute(
-            "DELETE FROM addresses WHERE id = ? AND user_id = ?",
+            "DELETE FROM addresses WHERE id = %s AND user_id = %s",
             (address_id, g.user_id)
         )
         conn.commit()

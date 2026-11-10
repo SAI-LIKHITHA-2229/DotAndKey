@@ -1,4 +1,3 @@
-import datetime
 import json
 from contextlib import closing
 
@@ -20,9 +19,8 @@ bp = Blueprint("orders", __name__)
 # Orders start "confirmed"; a fulfilment system would move them to
 # "shipped" and "delivered". Prepaid methods use a demo payment step (no
 # money is taken), recorded honestly as "demo_paid"; cash on delivery and
-# pay later stay "pending" until the customer pays.
-ORDER_STATUSES = ("confirmed", "shipped", "delivered", "cancelled")
-PAYMENT_STATUSES = ("pending", "demo_paid")
+# pay later stay "pending" until the customer pays. The orders table only
+# accepts known status values.
 
 
 @bp.route("/checkout/summary")
@@ -77,13 +75,9 @@ def place_order():
         return jsonify({"error": "Choose an option for this payment method"}), 400
 
     with closing(get_db_connection()) as conn:
-        # Lock the database for the whole order so the cart cannot change
-        # between reading it and emptying it. Early returns roll back.
-        conn.execute("BEGIN IMMEDIATE")
-
         # Only this user's own addresses can be used.
         address_row = conn.execute(
-            f"SELECT {ADDRESS_COLUMNS} FROM addresses WHERE id = ? AND user_id = ?",
+            f"SELECT {ADDRESS_COLUMNS} FROM addresses WHERE id = %s AND user_id = %s",
             (address_id, g.user_id)
         ).fetchone()
         if address_row is None:
@@ -130,16 +124,15 @@ def place_order():
         _, total = method_total(bill_total, method)
         payment_text = method["title"] + (f" · {option}" if option else "")
         payment_status = "demo_paid" if method["prepaid"] else "pending"
-        created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         order_id = conn.execute(
             "INSERT INTO orders (user_id, items, total, address, payment_method, "
-            "payment_status, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?) "
+            "payment_status, status) VALUES (%s, %s, %s, %s, %s, %s, 'confirmed') "
             "RETURNING id",
             (g.user_id, json.dumps(items + gift_items), total, address_text,
-             payment_text, payment_status, created_at)
+             payment_text, payment_status)
         ).fetchone()["id"]
-        conn.execute("DELETE FROM cart WHERE user_id = ?", (g.user_id,))
+        conn.execute("DELETE FROM cart WHERE user_id = %s", (g.user_id,))
         conn.commit()
 
     return jsonify({"message": "Order placed", "order_id": order_id, "total": total,
@@ -152,7 +145,7 @@ def list_orders():
     with closing(get_db_connection()) as conn:
         rows = conn.execute(
             "SELECT id, items, total, address, payment_method, status, payment_status, "
-            "created_at FROM orders WHERE user_id = ? ORDER BY id DESC",
+            "created_at FROM orders WHERE user_id = %s ORDER BY id DESC",
             (g.user_id,)
         ).fetchall()
 
@@ -160,5 +153,6 @@ def list_orders():
     for row in rows:
         order = dict(row)
         order["items"] = json.loads(order["items"])
+        order["created_at"] = order["created_at"].isoformat()
         orders.append(order)
     return jsonify(orders)
