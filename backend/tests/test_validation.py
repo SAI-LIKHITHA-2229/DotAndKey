@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from conftest import VALID_ADDRESS
@@ -20,6 +22,18 @@ def test_protected_routes_reject_wrong_body_shape(client, auth, path, body):
     response = client.post(path, headers=auth, data=body, content_type="application/json")
     assert response.status_code == 400
     assert "error" in response.get_json()
+
+
+@pytest.mark.parametrize("bad_text", ["\\u0000", "\\ud83d"])
+def test_text_the_database_cannot_store_is_cleaned(client, auth, bad_text):
+    login_body = f'{{"username": "ali{bad_text}ce", "password": "pass{bad_text}word"}}'
+    response = client.post("/login", data=login_body, content_type="application/json")
+    assert response.status_code == 401
+
+    address_body = json.dumps(VALID_ADDRESS).replace("Alice Example", f"Alice{bad_text} Example")
+    response = client.post("/addresses", headers=auth, data=address_body,
+                           content_type="application/json")
+    assert response.status_code == 201
 
 
 def test_wrong_field_types_are_rejected_not_crashing(client, auth):
