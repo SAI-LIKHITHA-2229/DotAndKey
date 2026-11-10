@@ -28,7 +28,6 @@ bp = Blueprint("orders", __name__)
 def checkout_summary():
     with closing(get_db_connection()) as conn:
         items = cart_lines(conn, g.user_id)
-        conn.commit()
 
     subtotal, discount, bill_total = price_cart(items)
     max_gifts = max_gifts_for(bill_total)

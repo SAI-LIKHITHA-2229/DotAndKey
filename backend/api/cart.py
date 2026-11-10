@@ -17,19 +17,18 @@ def cart_lines(conn, user_id):
 
     The database only stores product_id, variant and quantity, so prices are
     always current and can never be set by the client. Lines whose product
-    has left the catalog are deleted; the caller commits, so this is safe to
-    use inside a larger transaction such as placing an order.
+    has left the catalog are skipped. This only reads, so viewing a cart
+    never changes it.
     """
     rows = conn.execute(
         "SELECT id, product_id, variant, quantity FROM cart WHERE user_id = %s ORDER BY id",
         (user_id,)
     ).fetchall()
 
-    lines, gone = [], []
+    lines = []
     for row in rows:
         resolved = resolve_cart_item(row["product_id"], row["variant"] or None)
         if resolved is None:
-            gone.append(row["id"])
             continue
         name, price, image = resolved
         lines.append({
@@ -41,9 +40,6 @@ def cart_lines(conn, user_id):
             "image": image,
             "quantity": row["quantity"],
         })
-
-    if gone:
-        conn.execute("DELETE FROM cart WHERE id = ANY(%s)", (gone,))
     return lines
 
 
@@ -52,7 +48,6 @@ def cart_lines(conn, user_id):
 def get_cart():
     with closing(get_db_connection()) as conn:
         lines = cart_lines(conn, g.user_id)
-        conn.commit()
     return jsonify(lines)
 
 
