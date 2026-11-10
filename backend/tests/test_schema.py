@@ -33,7 +33,7 @@ def test_fresh_database_gets_full_schema():
             "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
         )}
 
-    assert tables == {"users", "cart", "addresses", "orders"}
+    assert tables == {"schema_migrations", "users", "cart", "addresses", "orders"}
     # c = cascade (removed with the user), r = restrict (blocks deleting the user).
     assert delete_rules == {"cart": "c", "addresses": "c", "orders": "r"}
     assert {"idx_users_username_lower", "idx_addresses_user_id", "idx_orders_user_id"} <= indexes

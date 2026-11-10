@@ -1,5 +1,6 @@
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 import psycopg
@@ -11,7 +12,7 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 
 from api import create_app  # noqa: E402
-from api.db import create_schema  # noqa: E402
+from api.db import migrate  # noqa: E402
 
 TEST_SECRET = "test-secret-key-that-is-at-least-32-bytes"
 TEST_DATABASE_NAME = "dotandkey_test"
@@ -50,13 +51,34 @@ def connect_to_test_database():
     return psycopg.connect(TEST_URL, row_factory=dict_row, connect_timeout=10)
 
 
-def rebuild_test_schema():
-    """Erase everything in the test database and create the tables again."""
+def erase_test_schema():
+    """Remove every table from the test database."""
     require_test_database(TEST_URL)
     with connect_to_test_database() as conn:
         conn.execute("DROP SCHEMA public CASCADE")
         conn.execute("CREATE SCHEMA public")
-        create_schema(conn)
+
+
+def rebuild_test_schema():
+    """Erase the test database and create the latest tables again."""
+    erase_test_schema()
+    with connect_to_test_database() as conn:
+        migrate(conn)
+
+
+def run_at_once(count, task):
+    """Call task(0) ... task(count - 1) at the same moment; return their results."""
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return list(pool.map(task, range(count)))
+
+
+def requests_at_once(app, count, request):
+    """Run request(client) `count` times at once; return the status codes."""
+    def one_request(_):
+        with app.test_client() as client:
+            return request(client).status_code
+
+    return run_at_once(count, one_request)
 
 
 @pytest.fixture(scope="session", autouse=True)

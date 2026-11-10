@@ -1,8 +1,11 @@
+import logging
 from contextlib import closing
 
 import psycopg
 from flask import current_app
 from psycopg.rows import dict_row
+
+log = logging.getLogger(__name__)
 
 
 def get_db_connection():
@@ -19,8 +22,10 @@ def get_db_connection():
         raise RuntimeError("DATABASE_URL is not a valid PostgreSQL address") from None
 
 
-# Each statement is safe to repeat, so the whole list runs on every start.
-SCHEMA = (
+# ---- Migrations ----
+# Each entry upgrades the schema once, and schema_migrations remembers which
+# ones have run. Never edit a released entry; add a new one instead.
+_INITIAL_SCHEMA = (
     """
     CREATE TABLE IF NOT EXISTS users (
         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -77,12 +82,41 @@ SCHEMA = (
 )
 
 
-def create_schema(conn):
-    for statement in SCHEMA:
-        conn.execute(statement)
+MIGRATIONS = (
+    (1, "initial_schema", _INITIAL_SCHEMA),
+)
+
+# Any number works, as long as every copy of the app uses the same one.
+MIGRATION_LOCK_ID = 726354
+
+
+def migrate(conn, up_to=None):
+    """Apply the missing migrations in one transaction and commit it.
+
+    `up_to` stops at an earlier version; tests use it to build an old schema.
+    """
+    # Only one process migrates at a time. The lock ends with the transaction.
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (MIGRATION_LOCK_ID,))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    applied = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
+
+    for version, name, statements in MIGRATIONS:
+        if version in applied or (up_to is not None and version > up_to):
+            continue
+        for statement in statements:
+            conn.execute(statement)
+        conn.execute("INSERT INTO schema_migrations (version, name) VALUES (%s, %s)",
+                     (version, name))
+        log.info("Applied database migration %d (%s)", version, name)
+    conn.commit()
 
 
 def init_db():
     with closing(get_db_connection()) as conn:
-        create_schema(conn)
-        conn.commit()
+        migrate(conn)

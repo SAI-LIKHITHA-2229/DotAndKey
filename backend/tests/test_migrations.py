@@ -5,8 +5,8 @@ import pytest
 
 from api import create_app
 from api.cart import cart_lines
-from api.db import get_db_connection
-from conftest import TEST_SECRET, connect_to_test_database
+from api.db import MIGRATIONS, get_db_connection, migrate
+from conftest import TEST_SECRET, connect_to_test_database, erase_test_schema, run_at_once
 
 LIP_MASK_ID = 6
 
@@ -16,6 +16,12 @@ def add_user():
         return conn.execute(
             "INSERT INTO users (username, password_hash) VALUES ('alice', 'x') RETURNING id"
         ).fetchone()["id"]
+
+
+def applied_versions():
+    with connect_to_test_database() as conn:
+        rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+    return [row["version"] for row in rows]
 
 
 def test_cart_prices_come_from_catalog_and_unknown_products_are_dropped(app):
@@ -45,6 +51,19 @@ def test_migrations_run_once():
 
     with connect_to_test_database() as conn:
         assert conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"] == 1
+    assert applied_versions() == [version for version, _, _ in MIGRATIONS]
+
+
+def test_simultaneous_starts_apply_each_migration_once():
+    erase_test_schema()
+
+    def start(_):
+        with connect_to_test_database() as conn:
+            migrate(conn)
+
+    run_at_once(8, start)
+
+    assert applied_versions() == [version for version, _, _ in MIGRATIONS]
 
 
 def test_foreign_keys_are_enforced(app):
