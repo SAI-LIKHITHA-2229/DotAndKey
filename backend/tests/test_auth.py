@@ -101,6 +101,13 @@ def test_usernames_are_unique_ignoring_case(client):
     assert response.status_code == 409
 
 
+def test_login_ignores_username_case(client):
+    client.post("/register", json={"username": "Alice", "password": "password123"})
+    response = login(client, username="aLiCe")
+    assert response.status_code == 200
+    assert response.get_json()["username"] == "Alice"
+
+
 def test_login_uses_same_message_for_unknown_user_and_wrong_password(client):
     make_user(client)
     wrong_password = login(client, password="nope-nope")

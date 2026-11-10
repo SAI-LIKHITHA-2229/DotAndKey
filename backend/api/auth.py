@@ -132,7 +132,8 @@ def login():
 
     with closing(get_db_connection()) as conn:
         user = conn.execute(
-            "SELECT id, username, password_hash, token_version FROM users WHERE username = ?",
+            "SELECT id, username, password_hash, token_version FROM users "
+            "WHERE lower(username) = lower(?)",
             (username,)
         ).fetchone()
 
