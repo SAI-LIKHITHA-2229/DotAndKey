@@ -87,6 +87,8 @@ def add_address():
         return jsonify({"error": error}), 400
 
     with closing(get_db_connection()) as conn:
+        # Holding the user's row makes simultaneous saves count one at a time.
+        conn.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (g.user_id,))
         count = conn.execute(
             "SELECT COUNT(*) AS n FROM addresses WHERE user_id = %s", (g.user_id,)
         ).fetchone()["n"]

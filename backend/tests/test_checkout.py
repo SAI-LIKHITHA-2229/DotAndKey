@@ -1,7 +1,8 @@
 import pytest
 
 from api import pricing
-from conftest import VALID_ADDRESS, make_user
+from api.addresses import MAX_ADDRESSES
+from conftest import VALID_ADDRESS, make_user, requests_at_once
 
 
 @pytest.mark.parametrize(
@@ -46,6 +47,15 @@ def test_addresses_are_private(client, auth):
 
     assert client.get("/addresses", headers=bob).get_json() == []
     assert client.put(f"/addresses/{address_id}", headers=bob, json=VALID_ADDRESS).status_code == 404
+
+
+def test_simultaneous_saves_never_pass_the_address_limit(app, client, auth):
+    codes = requests_at_once(
+        app, MAX_ADDRESSES + 6, lambda c: c.post("/addresses", headers=auth, json=VALID_ADDRESS)
+    )
+
+    assert sorted(codes) == [201] * MAX_ADDRESSES + [400] * 6
+    assert len(client.get("/addresses", headers=auth).get_json()) == MAX_ADDRESSES
 
 
 # ---- Orders ----
