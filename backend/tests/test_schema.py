@@ -12,8 +12,8 @@ def add_user(conn, username="alice"):
 
 def add_order(conn, user_id, status="confirmed", payment_status="pending"):
     conn.execute(
-        "INSERT INTO orders (user_id, items, total, status, payment_status) "
-        "VALUES (%s, '[]', 100, %s, %s)",
+        "INSERT INTO orders (user_id, total, status, payment_status) "
+        "VALUES (%s, 100, %s, %s)",
         (user_id, status, payment_status),
     )
 
@@ -33,10 +33,11 @@ def test_fresh_database_gets_full_schema():
             "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
         )}
 
-    assert tables == {"schema_migrations", "users", "cart", "addresses", "orders"}
+    assert tables == {"schema_migrations", "users", "cart", "addresses", "orders", "order_items"}
     # c = cascade (removed with the user), r = restrict (blocks deleting the user).
-    assert delete_rules == {"cart": "c", "addresses": "c", "orders": "r"}
-    assert {"idx_users_username_lower", "idx_addresses_user_id", "idx_orders_user_id"} <= indexes
+    assert delete_rules == {"cart": "c", "addresses": "c", "orders": "r", "order_items": "c"}
+    assert {"idx_users_username_lower", "idx_addresses_user_id", "idx_orders_user_id",
+            "idx_order_items_order_id"} <= indexes
 
 
 def test_a_user_with_orders_cannot_be_deleted():

@@ -82,8 +82,33 @@ _INITIAL_SCHEMA = (
 )
 
 
+# Moves each order's items out of the JSON text column into their own rows.
+_ORDER_ITEMS = (
+    """
+    CREATE TABLE order_items (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        order_id BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        product_name TEXT NOT NULL,
+        price INTEGER NOT NULL CHECK (price >= 0),
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        image TEXT
+    )
+    """,
+    "CREATE INDEX idx_order_items_order_id ON order_items (order_id)",
+    """
+    INSERT INTO order_items (order_id, product_name, price, quantity, image)
+    SELECT o.id, entry.item->>'product_name', (entry.item->>'price')::integer,
+           (entry.item->>'quantity')::integer, entry.item->>'image'
+    FROM orders o
+    CROSS JOIN LATERAL jsonb_array_elements(o.items::jsonb) WITH ORDINALITY AS entry(item, place)
+    ORDER BY o.id, entry.place
+    """,
+    "ALTER TABLE orders DROP COLUMN items",
+)
+
 MIGRATIONS = (
     (1, "initial_schema", _INITIAL_SCHEMA),
+    (2, "order_items", _ORDER_ITEMS),
 )
 
 # Any number works, as long as every copy of the app uses the same one.

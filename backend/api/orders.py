@@ -1,4 +1,4 @@
-import json
+from collections import defaultdict
 from contextlib import closing
 
 from flask import Blueprint, g, jsonify
@@ -125,12 +125,18 @@ def place_order():
         payment_status = "demo_paid" if method["prepaid"] else "pending"
 
         order_id = conn.execute(
-            "INSERT INTO orders (user_id, items, total, address, payment_method, "
-            "payment_status, status) VALUES (%s, %s, %s, %s, %s, %s, 'confirmed') "
+            "INSERT INTO orders (user_id, total, address, payment_method, "
+            "payment_status, status) VALUES (%s, %s, %s, %s, %s, 'confirmed') "
             "RETURNING id",
-            (g.user_id, json.dumps(items + gift_items), total, address_text,
-             payment_text, payment_status)
+            (g.user_id, total, address_text, payment_text, payment_status)
         ).fetchone()["id"]
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO order_items (order_id, product_name, price, quantity, image) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                [(order_id, item["product_name"], item["price"], item["quantity"], item["image"])
+                 for item in items + gift_items]
+            )
         conn.execute("DELETE FROM cart WHERE user_id = %s", (g.user_id,))
         conn.commit()
 
@@ -142,16 +148,24 @@ def place_order():
 @login_required
 def list_orders():
     with closing(get_db_connection()) as conn:
-        rows = conn.execute(
-            "SELECT id, items, total, address, payment_method, status, payment_status, "
+        orders = conn.execute(
+            "SELECT id, total, address, payment_method, status, payment_status, "
             "created_at FROM orders WHERE user_id = %s ORDER BY id DESC",
             (g.user_id,)
         ).fetchall()
+        # One query for every item, instead of one query per order.
+        item_rows = conn.execute(
+            "SELECT i.order_id, i.product_name, i.price, i.quantity, i.image "
+            "FROM order_items i JOIN orders o ON o.id = i.order_id "
+            "WHERE o.user_id = %s ORDER BY i.id",
+            (g.user_id,)
+        ).fetchall()
 
-    orders = []
-    for row in rows:
-        order = dict(row)
-        order["items"] = json.loads(order["items"])
+    items_by_order = defaultdict(list)
+    for item in item_rows:
+        items_by_order[item.pop("order_id")].append(item)
+
+    for order in orders:
+        order["items"] = items_by_order[order["id"]]
         order["created_at"] = order["created_at"].isoformat()
-        orders.append(order)
     return jsonify(orders)

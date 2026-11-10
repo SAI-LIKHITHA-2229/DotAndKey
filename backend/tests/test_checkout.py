@@ -68,6 +68,7 @@ def place(client, headers, **overrides):
 def test_order_flow(client, auth):
     address_id = client.post("/addresses", headers=auth, json=VALID_ADDRESS).get_json()["id"]
     assert place(client, auth, address_id=address_id).status_code == 400   # empty cart
+    assert client.get("/orders", headers=auth).get_json() == []
 
     client.post("/cart", headers=auth, json={"product_id": 6, "variant": None})
     response = place(client, auth, address_id=address_id)
@@ -82,6 +83,25 @@ def test_order_flow(client, auth):
     assert order["payment_status"] == "pending"          # cash on delivery
     assert "user_id" not in order
     assert "user_id" not in client.get("/addresses", headers=auth).get_json()[0]
+    # The exact shape the Account page reads.
+    assert set(order) == {"id", "items", "total", "address", "payment_method",
+                          "status", "payment_status", "created_at"}
+    assert set(order["items"][0]) == {"product_name", "price", "quantity", "image"}
+    assert (order["items"][0]["price"], order["items"][0]["quantity"]) == (399, 1)
+
+
+def test_order_items_stay_in_order_with_gifts_last(client, auth):
+    address_id = client.post("/addresses", headers=auth, json=VALID_ADDRESS).get_json()["id"]
+    for _ in range(4):
+        client.post("/cart", headers=auth, json={"product_id": 6, "variant": None})
+
+    response = place(client, auth, address_id=address_id, gifts=[pricing.FREE_GIFTS[0]["name"]])
+    assert response.status_code == 201
+
+    [order] = client.get("/orders", headers=auth).get_json()
+    assert order["items"][0]["product_name"] == "Lip Mask"
+    assert order["items"][0]["quantity"] == 4
+    assert order["items"][-1]["product_name"].endswith("(Free gift)")
 
 
 def test_prepaid_orders_are_marked_as_demo_payments(client, auth):

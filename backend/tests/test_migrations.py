@@ -1,3 +1,4 @@
+import json
 from contextlib import closing
 
 import psycopg
@@ -64,6 +65,33 @@ def test_simultaneous_starts_apply_each_migration_once():
     run_at_once(8, start)
 
     assert applied_versions() == [version for version, _, _ in MIGRATIONS]
+
+
+def test_order_items_migration_keeps_existing_orders():
+    """An order saved with the old JSON column keeps every item, in order."""
+    erase_test_schema()
+    with connect_to_test_database() as conn:
+        migrate(conn, up_to=1)
+    user_id = add_user()
+    old_items = [
+        {"product_name": "Lip Mask", "price": 399, "quantity": 2, "image": "lip.jpg"},
+        {"product_name": "Gift (Free gift)", "price": 0, "quantity": 1, "image": "gift.jpg"},
+    ]
+    with connect_to_test_database() as conn:
+        conn.execute("INSERT INTO orders (user_id, items, total) VALUES (%s, %s, 798)",
+                     (user_id, json.dumps(old_items)))
+
+    with connect_to_test_database() as conn:
+        migrate(conn)
+        rows = conn.execute(
+            "SELECT product_name, price, quantity, image FROM order_items ORDER BY id"
+        ).fetchall()
+        columns = {row["column_name"] for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'"
+        )}
+
+    assert rows == old_items
+    assert "items" not in columns
 
 
 def test_foreign_keys_are_enforced(app):
