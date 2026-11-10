@@ -57,6 +57,31 @@ def checkout_summary():
     })
 
 
+def take_stock(conn, lines):
+    """Reduce stock for an order, or return a message if something has run out.
+
+    Rows are locked in one fixed order, so two orders can never each hold a
+    row the other is waiting for. If a message comes back, the caller's
+    transaction is rolled back and every reduction made here is undone.
+    """
+    for line in sorted(lines, key=lambda line: (line["product_id"], line["variant"] or "")):
+        key = (line["product_id"], line["variant"] or "")
+        stock = conn.execute(
+            "SELECT quantity FROM inventory WHERE product_id = %s AND variant = %s FOR UPDATE",
+            key
+        ).fetchone()
+        available = stock["quantity"] if stock else 0
+        if available == 0:
+            return f"{line['product_name']} is out of stock"
+        if available < line["quantity"]:
+            return f"Only {available} left of {line['product_name']}"
+        conn.execute(
+            "UPDATE inventory SET quantity = quantity - %s WHERE product_id = %s AND variant = %s",
+            (line["quantity"], *key)
+        )
+    return None
+
+
 @bp.route("/orders", methods=["POST"])
 @login_required
 def place_order():
@@ -74,6 +99,12 @@ def place_order():
         return jsonify({"error": "Choose an option for this payment method"}), 400
 
     with closing(get_db_connection()) as conn:
+        # Locks are always taken in this order: the user, their cart rows, then
+        # stock rows. Until commit the cart can't change, and a second order
+        # from the same user waits here and then finds the cart empty.
+        conn.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (g.user_id,))
+        conn.execute("SELECT id FROM cart WHERE user_id = %s ORDER BY id FOR UPDATE", (g.user_id,))
+
         # Only this user's own addresses can be used.
         address_row = conn.execute(
             f"SELECT {ADDRESS_COLUMNS} FROM addresses WHERE id = %s AND user_id = %s",
@@ -85,9 +116,10 @@ def place_order():
 
         # Snapshot the current catalog price: the order keeps what was paid
         # even if the catalog changes later.
+        lines = cart_lines(conn, g.user_id)
         items = [
             {key: line[key] for key in ("product_name", "price", "quantity", "image")}
-            for line in cart_lines(conn, g.user_id)
+            for line in lines
         ]
         if not items:
             return jsonify({"error": "Your cart is empty"}), 400
@@ -109,6 +141,10 @@ def place_order():
             if not valid:
                 return jsonify({"error": "Invalid free gift selection"}), 400
             gifts = [gift_lookup[name] for name in chosen_gifts]
+
+        stock_problem = take_stock(conn, lines)
+        if stock_problem:
+            return jsonify({"error": stock_problem}), 409
 
         gift_items = [
             {

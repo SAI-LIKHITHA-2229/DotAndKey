@@ -12,7 +12,7 @@ BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 
 from api import create_app  # noqa: E402
-from api.db import migrate  # noqa: E402
+from api.db import migrate, sync_inventory  # noqa: E402
 
 TEST_SECRET = "test-secret-key-that-is-at-least-32-bytes"
 TEST_DATABASE_NAME = "dotandkey_test"
@@ -64,6 +64,7 @@ def rebuild_test_schema():
     erase_test_schema()
     with connect_to_test_database() as conn:
         migrate(conn)
+        sync_inventory(conn)
 
 
 def run_at_once(count, task):
@@ -97,12 +98,14 @@ def prepare_test_database():
 
 @pytest.fixture(autouse=True)
 def clean_database(prepare_test_database):
-    """Every test starts with empty tables and ids counting from 1."""
+    """Every test starts with empty tables, full stock and ids counting from 1."""
     require_test_database(TEST_URL)
     with connect_to_test_database() as conn:
         # Fail clearly instead of waiting forever if a connection was left open.
         conn.execute("SET lock_timeout = '5s'")
-        conn.execute("TRUNCATE users, cart, addresses, orders RESTART IDENTITY CASCADE")
+        conn.execute("TRUNCATE users, cart, addresses, orders, order_items, inventory "
+                     "RESTART IDENTITY CASCADE")
+        sync_inventory(conn)
 
 
 @pytest.fixture

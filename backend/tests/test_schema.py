@@ -1,7 +1,10 @@
 import psycopg
 import pytest
 
-from conftest import connect_to_test_database, rebuild_test_schema
+from api import create_app
+from api.catalog import PRODUCTS
+from api.db import INITIAL_STOCK
+from conftest import TEST_SECRET, connect_to_test_database, rebuild_test_schema
 
 
 def add_user(conn, username="alice"):
@@ -33,7 +36,8 @@ def test_fresh_database_gets_full_schema():
             "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
         )}
 
-    assert tables == {"schema_migrations", "users", "cart", "addresses", "orders", "order_items"}
+    assert tables == {"schema_migrations", "users", "cart", "addresses", "orders", "order_items",
+                      "inventory"}
     # c = cascade (removed with the user), r = restrict (blocks deleting the user).
     assert delete_rules == {"cart": "c", "addresses": "c", "orders": "r", "order_items": "c"}
     assert {"idx_users_username_lower", "idx_addresses_user_id", "idx_orders_user_id",
@@ -54,6 +58,28 @@ def test_order_statuses_must_be_known_values(field):
         user_id = add_user(conn)
         with pytest.raises(psycopg.errors.CheckViolation):
             add_order(conn, user_id, **{field: "made_up"})
+        conn.rollback()
+
+
+def test_every_catalog_item_starts_with_full_stock():
+    expected = sum(len(product.get("variants") or [None]) for product in PRODUCTS)
+    with connect_to_test_database() as conn:
+        quantities = [row["quantity"] for row in conn.execute("SELECT quantity FROM inventory")]
+    assert quantities == [INITIAL_STOCK] * expected
+
+
+def test_a_restart_does_not_reset_stock():
+    with connect_to_test_database() as conn:
+        conn.execute("UPDATE inventory SET quantity = 7")
+    create_app({"TESTING": True, "SECRET_KEY": TEST_SECRET})
+    with connect_to_test_database() as conn:
+        assert {row["quantity"] for row in conn.execute("SELECT quantity FROM inventory")} == {7}
+
+
+def test_stock_cannot_go_below_zero():
+    with connect_to_test_database() as conn:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute("UPDATE inventory SET quantity = -1")
         conn.rollback()
 
 

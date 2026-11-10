@@ -1,8 +1,16 @@
+import threading
+
 import pytest
 
 from api import pricing
 from api.addresses import MAX_ADDRESSES
-from conftest import VALID_ADDRESS, make_user, requests_at_once
+from conftest import (
+    VALID_ADDRESS, connect_to_test_database, make_user, requests_at_once, run_at_once,
+)
+
+LIP_MASK = {"product_id": 6, "variant": None}
+MOISTURIZER_VARIANT = "Watermelon Cooling Gel"
+MOISTURIZER = {"product_id": 1, "variant": MOISTURIZER_VARIANT}
 
 
 @pytest.mark.parametrize(
@@ -102,6 +110,119 @@ def test_order_items_stay_in_order_with_gifts_last(client, auth):
     assert order["items"][0]["product_name"] == "Lip Mask"
     assert order["items"][0]["quantity"] == 4
     assert order["items"][-1]["product_name"].endswith("(Free gift)")
+
+
+# ---- Stock ----
+def stock_of(product_id=6, variant=""):
+    with connect_to_test_database() as conn:
+        return conn.execute(
+            "SELECT quantity FROM inventory WHERE product_id = %s AND variant = %s",
+            (product_id, variant),
+        ).fetchone()["quantity"]
+
+
+def set_stock(quantity, product_id=6, variant=""):
+    with connect_to_test_database() as conn:
+        conn.execute(
+            "UPDATE inventory SET quantity = %s WHERE product_id = %s AND variant = %s",
+            (quantity, product_id, variant),
+        )
+
+
+def count_rows(table):
+    with connect_to_test_database() as conn:
+        return conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+
+
+def shopper(client, name, products=(LIP_MASK,)):
+    """A new user with a saved address and the given products in the cart."""
+    headers = make_user(client, name)
+    address_id = client.post("/addresses", headers=headers, json=VALID_ADDRESS).get_json()["id"]
+    for product in products:
+        client.post("/cart", headers=headers, json=product)
+    return headers, address_id
+
+
+def checkouts_at_once(app, shoppers):
+    """Every shopper presses "place order" at the same moment."""
+    start_together = threading.Barrier(len(shoppers))
+
+    def checkout(index):
+        headers, address_id = shoppers[index]
+        with app.test_client() as client:
+            start_together.wait(timeout=10)
+            return place(client, headers, address_id=address_id).status_code
+
+    return run_at_once(len(shoppers), checkout)
+
+
+def test_an_order_reduces_stock(client):
+    headers, address_id = shopper(client, "alice")
+    client.post("/cart", headers=headers, json=LIP_MASK)     # quantity 2
+
+    assert place(client, headers, address_id=address_id).status_code == 201
+    assert stock_of() == 98
+
+
+def test_an_order_for_more_than_is_left_is_refused(client):
+    headers, address_id = shopper(client, "alice")
+    client.post("/cart", headers=headers, json=LIP_MASK)     # quantity 2
+    set_stock(1)
+
+    response = place(client, headers, address_id=address_id)
+
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "Only 1 left of Lip Mask"
+    assert stock_of() == 1
+    assert count_rows("orders") == 0
+    assert len(client.get("/cart", headers=headers).get_json()) == 1   # the cart is kept
+
+
+def test_a_refused_order_takes_no_stock_at_all(client):
+    """The first item is available and the second isn't: nothing may change."""
+    headers, address_id = shopper(client, "alice", (MOISTURIZER, LIP_MASK))
+    set_stock(0)
+
+    response = place(client, headers, address_id=address_id)
+
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "Lip Mask is out of stock"
+    assert stock_of(1, MOISTURIZER_VARIANT) == 100
+
+
+@pytest.mark.parametrize("attempt", range(5))
+def test_two_simultaneous_checkouts_of_the_last_unit_exactly_one_wins(app, client, attempt):
+    shoppers = [shopper(client, "alice"), shopper(client, "bob")]
+    set_stock(1)
+
+    codes = checkouts_at_once(app, shoppers)
+
+    assert sorted(codes) == [201, 409]
+    assert stock_of() == 0
+    assert count_rows("orders") == 1
+    assert count_rows("cart") == 1      # the loser still has their cart
+
+
+def test_double_submit_by_one_user_places_one_order(app, client):
+    headers, address_id = shopper(client, "alice")
+
+    codes = checkouts_at_once(app, [(headers, address_id), (headers, address_id)])
+
+    assert sorted(codes) == [201, 400]  # the second finds the cart empty
+    assert stock_of() == 99
+    assert count_rows("orders") == 1
+
+
+def test_carts_filled_in_opposite_orders_cannot_deadlock(app, client):
+    shoppers = [
+        shopper(client, f"shopper{number}",
+                (MOISTURIZER, LIP_MASK) if number % 2 else (LIP_MASK, MOISTURIZER))
+        for number in range(6)
+    ]
+
+    assert checkouts_at_once(app, shoppers) == [201] * 6
+    assert stock_of() == 94
+    assert stock_of(1, MOISTURIZER_VARIANT) == 94
 
 
 def test_prepaid_orders_are_marked_as_demo_payments(client, auth):

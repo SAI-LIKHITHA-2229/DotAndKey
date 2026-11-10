@@ -5,6 +5,8 @@ import psycopg
 from flask import current_app
 from psycopg.rows import dict_row
 
+from .catalog import PRODUCTS
+
 log = logging.getLogger(__name__)
 
 
@@ -106,9 +108,21 @@ _ORDER_ITEMS = (
     "ALTER TABLE orders DROP COLUMN items",
 )
 
+_INVENTORY = (
+    """
+    CREATE TABLE inventory (
+        product_id INTEGER NOT NULL,
+        variant TEXT NOT NULL DEFAULT '',
+        quantity INTEGER NOT NULL CHECK (quantity >= 0),
+        PRIMARY KEY (product_id, variant)
+    )
+    """,
+)
+
 MIGRATIONS = (
     (1, "initial_schema", _INITIAL_SCHEMA),
     (2, "order_items", _ORDER_ITEMS),
+    (3, "inventory", _INVENTORY),
 )
 
 # Any number works, as long as every copy of the app uses the same one.
@@ -142,6 +156,27 @@ def migrate(conn, up_to=None):
     conn.commit()
 
 
+INITIAL_STOCK = 100
+
+
+def sync_inventory(conn):
+    """Give every catalog item a stock row. Existing counts are left alone."""
+    rows = [
+        (product["id"], variant["label"], INITIAL_STOCK)
+        for product in PRODUCTS
+        # A product without variants gets one row, with an empty variant name.
+        for variant in (product.get("variants") or [{"label": ""}])
+    ]
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO inventory (product_id, variant, quantity) VALUES (%s, %s, %s) "
+            "ON CONFLICT (product_id, variant) DO NOTHING",
+            rows,
+        )
+    conn.commit()
+
+
 def init_db():
     with closing(get_db_connection()) as conn:
         migrate(conn)
+        sync_inventory(conn)
