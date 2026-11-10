@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from api.cart import MAX_QUANTITY
 from api.catalog import PRODUCTS, PRODUCTS_BY_ID
 from conftest import make_user
@@ -54,6 +56,35 @@ def test_quantity_is_capped(client, auth):
 
     [item] = client.get("/cart", headers=auth).get_json()
     assert client.put(f"/cart/{item['id']}/increase", headers=auth).status_code == 400
+
+
+def at_the_same_time(app, count, request):
+    """Run `request(client)` `count` times at once and return the status codes."""
+    def one_request(_):
+        with app.test_client() as client:
+            return request(client).status_code
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return list(pool.map(one_request, range(count)))
+
+
+def test_simultaneous_adds_never_pass_the_limit(app, client, auth):
+    codes = at_the_same_time(app, MAX_QUANTITY + 6, lambda c: add(c, auth))
+
+    assert sorted(codes) == [201] * MAX_QUANTITY + [400] * 6
+    assert client.get("/cart", headers=auth).get_json()[0]["quantity"] == MAX_QUANTITY
+
+
+def test_simultaneous_increases_never_pass_the_limit(app, client, auth):
+    add(client, auth)
+    item_id = client.get("/cart", headers=auth).get_json()[0]["id"]
+
+    codes = at_the_same_time(
+        app, MAX_QUANTITY + 5, lambda c: c.put(f"/cart/{item_id}/increase", headers=auth)
+    )
+
+    assert sorted(codes) == [200] * (MAX_QUANTITY - 1) + [400] * 6
+    assert client.get("/cart", headers=auth).get_json()[0]["quantity"] == MAX_QUANTITY
 
 
 def test_increase_decrease_and_remove(client, auth):
