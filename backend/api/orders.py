@@ -4,7 +4,7 @@ from contextlib import closing
 
 from flask import Blueprint, g, jsonify
 
-from .addresses import address_to_text
+from .addresses import ADDRESS_COLUMNS, address_to_text
 from .auth import login_required
 from .cart import cart_lines
 from .db import get_db_connection
@@ -83,7 +83,7 @@ def place_order():
 
         # Only this user's own addresses can be used.
         address_row = conn.execute(
-            "SELECT * FROM addresses WHERE id = ? AND user_id = ?",
+            f"SELECT {ADDRESS_COLUMNS} FROM addresses WHERE id = ? AND user_id = ?",
             (address_id, g.user_id)
         ).fetchone()
         if address_row is None:
@@ -132,15 +132,15 @@ def place_order():
         payment_status = "demo_paid" if method["prepaid"] else "pending"
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        cursor = conn.execute(
+        order_id = conn.execute(
             "INSERT INTO orders (user_id, items, total, address, payment_method, "
-            "payment_status, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?)",
+            "payment_status, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?) "
+            "RETURNING id",
             (g.user_id, json.dumps(items + gift_items), total, address_text,
              payment_text, payment_status, created_at)
-        )
+        ).fetchone()["id"]
         conn.execute("DELETE FROM cart WHERE user_id = ?", (g.user_id,))
         conn.commit()
-        order_id = cursor.lastrowid
 
     return jsonify({"message": "Order placed", "order_id": order_id, "total": total,
                     "status": "confirmed", "payment_status": payment_status}), 201
@@ -151,7 +151,9 @@ def place_order():
 def list_orders():
     with closing(get_db_connection()) as conn:
         rows = conn.execute(
-            "SELECT * FROM orders WHERE user_id = ? ORDER BY id DESC", (g.user_id,)
+            "SELECT id, items, total, address, payment_method, status, payment_status, "
+            "created_at FROM orders WHERE user_id = ? ORDER BY id DESC",
+            (g.user_id,)
         ).fetchall()
 
     orders = []

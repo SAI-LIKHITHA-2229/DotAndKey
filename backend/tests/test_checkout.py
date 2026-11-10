@@ -70,6 +70,8 @@ def test_order_flow(client, auth):
     assert order["items"][0]["product_name"] == "Lip Mask"
     assert order["status"] == "confirmed"
     assert order["payment_status"] == "pending"          # cash on delivery
+    assert "user_id" not in order
+    assert "user_id" not in client.get("/addresses", headers=auth).get_json()[0]
 
 
 def test_prepaid_orders_are_marked_as_demo_payments(client, auth):

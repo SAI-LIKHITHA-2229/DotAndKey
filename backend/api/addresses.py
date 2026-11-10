@@ -25,6 +25,8 @@ MAX_ADDRESSES = 10
 ADDRESS_MAX_LENGTHS = {
     "full_name": 60, "flat": 120, "area": 120, "landmark": 120, "city": 60,
 }
+# Exactly what the app needs from a row; user_id stays on the server.
+ADDRESS_COLUMNS = "id, full_name, mobile, pincode, flat, area, landmark, city, state, type"
 
 
 def clean_address(data):
@@ -71,7 +73,7 @@ def address_to_text(address):
 def list_addresses():
     with closing(get_db_connection()) as conn:
         rows = conn.execute(
-            "SELECT * FROM addresses WHERE user_id = ? ORDER BY id DESC",
+            f"SELECT {ADDRESS_COLUMNS} FROM addresses WHERE user_id = ? ORDER BY id DESC",
             (g.user_id,)
         ).fetchall()
     return jsonify([dict(row) for row in rows])
@@ -91,15 +93,15 @@ def add_address():
         if count >= MAX_ADDRESSES:
             return jsonify({"error": f"You can save up to {MAX_ADDRESSES} addresses"}), 400
 
-        cursor = conn.execute(
+        new_id = conn.execute(
             "INSERT INTO addresses (user_id, full_name, mobile, pincode, flat, "
-            "area, landmark, city, state, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "area, landmark, city, state, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "RETURNING id",
             (g.user_id, cleaned["full_name"], cleaned["mobile"], cleaned["pincode"],
              cleaned["flat"], cleaned["area"], cleaned["landmark"], cleaned["city"],
              cleaned["state"], cleaned["type"])
-        )
+        ).fetchone()["id"]
         conn.commit()
-        new_id = cursor.lastrowid
 
     return jsonify({"message": "Address saved", "id": new_id}), 201
 
