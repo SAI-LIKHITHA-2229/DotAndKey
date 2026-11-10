@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, react-migration]
+    branches: [main, react-migration, postgres-migration]
   pull_request:
 
 jobs:
@@ -12,6 +12,28 @@ jobs:
     defaults:
       run:
         working-directory: backend
+
+    # A throwaway PostgreSQL 18 server that exists only while this job runs.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          # Not a secret: this database is created empty for CI and deleted afterwards.
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dotandkey_test
+        ports:
+          - 5432:5432
+        # Wait until the server accepts connections before the steps start.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dotandkey_test
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
