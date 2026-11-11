@@ -107,7 +107,7 @@ function Payment() {
           {paying ? 'Processing...' : 'Pay now'}
         </button>
         <p>
-          <Link to="/cart">← Back to cart</Link>
+          <Link to="/cart" className="back-link">← Back to cart</Link>
         </p>
       </form>
     </section>
