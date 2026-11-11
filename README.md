@@ -21,6 +21,19 @@ The React single-page frontend talks to a Flask REST API backed by PostgreSQL. L
 - **Orders:** order history with order status and payment status stored on the server. Each item is its own row in `order_items`.
 - **Accessibility:** product details open in a proper dialog that keeps keyboard focus inside it. Every control can be used with the keyboard and shows a visible focus ring.
 
+## Screenshots
+
+Taken at 1440×900 with a demo account and a made-up address.
+
+| | |
+|---|---|
+| ![Home page](docs/screenshots/home.png) | ![Shop page](docs/screenshots/shop.png) |
+| **Home:** the landing page with the current offer. | **Shop:** every product with its variants and shade swatches. |
+| ![Cart page](docs/screenshots/cart.png) | ![Payment page](docs/screenshots/payment.png) |
+| **Cart:** two items with the subtotal, 20% discount, shipping and free-gift progress. | **Payment:** the demo PIN step for prepaid methods. No money is charged. |
+| ![Account page](docs/screenshots/account.png) | ![Sign-in page](docs/screenshots/login.png) |
+| **Account:** saved addresses and order history. | **Sign in:** the login form, with a link to create an account. |
+
 ## Tech stack
 
 | Layer    | Technology |
