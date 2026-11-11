@@ -1015,6 +1015,20 @@ body.auth-page {
     text-decoration: underline;
 }
 
+/* Text link back to an earlier step, styled like the link buttons above */
+.back-link {
+    display: inline-block;
+    margin-top: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #d11267;
+    text-decoration: none;
+}
+
+.back-link:hover {
+    text-decoration: underline;
+}
+
 /* ---- Account / My Orders page ---- */
 body.account-page {
     background: #fff0f6;
@@ -1497,6 +1511,7 @@ body.pay-page {
 .close-btn:focus-visible,
 .product-image-btn:focus-visible,
 .link-btn:focus-visible,
+.back-link:focus-visible,
 .add-to-cart-btn:focus-visible,
 .variant-pill:focus-visible,
 .swatch-dot:focus-visible,
