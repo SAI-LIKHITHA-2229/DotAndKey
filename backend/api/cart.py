@@ -17,19 +17,18 @@ def cart_lines(conn, user_id):
 
     The database only stores product_id, variant and quantity, so prices are
     always current and can never be set by the client. Lines whose product
-    has left the catalog are deleted; the caller commits, so this is safe to
-    use inside a larger transaction such as placing an order.
+    has left the catalog are skipped. This only reads, so viewing a cart
+    never changes it.
     """
     rows = conn.execute(
-        "SELECT id, product_id, variant, quantity FROM cart WHERE user_id = ? ORDER BY id",
+        "SELECT id, product_id, variant, quantity FROM cart WHERE user_id = %s ORDER BY id",
         (user_id,)
     ).fetchall()
 
-    lines, gone = [], []
+    lines = []
     for row in rows:
         resolved = resolve_cart_item(row["product_id"], row["variant"] or None)
         if resolved is None:
-            gone.append(row["id"])
             continue
         name, price, image = resolved
         lines.append({
@@ -41,9 +40,6 @@ def cart_lines(conn, user_id):
             "image": image,
             "quantity": row["quantity"],
         })
-
-    if gone:
-        conn.executemany("DELETE FROM cart WHERE id = ?", [(item_id,) for item_id in gone])
     return lines
 
 
@@ -52,7 +48,6 @@ def cart_lines(conn, user_id):
 def get_cart():
     with closing(get_db_connection()) as conn:
         lines = cart_lines(conn, g.user_id)
-        conn.commit()
     return jsonify(lines)
 
 
@@ -74,23 +69,17 @@ def add_to_cart():
         return jsonify({"error": "Unknown product or variant"}), 400
 
     with closing(get_db_connection()) as conn:
-        existing = conn.execute(
-            "SELECT id, quantity FROM cart WHERE user_id = ? AND product_id = ? AND variant = ?",
-            (g.user_id, product_id, variant or "")
+        # One statement, so two quick clicks can't both pass the limit:
+        # add the line, or raise its quantity if it is still below the limit.
+        saved = conn.execute(
+            "INSERT INTO cart (user_id, product_id, variant, quantity) VALUES (%s, %s, %s, 1) "
+            "ON CONFLICT (user_id, product_id, variant) DO UPDATE "
+            "SET quantity = cart.quantity + 1 WHERE cart.quantity < %s "
+            "RETURNING id",
+            (g.user_id, product_id, variant or "", MAX_QUANTITY)
         ).fetchone()
-
-        if existing:
-            if existing["quantity"] >= MAX_QUANTITY:
-                return jsonify({"error": f"You can add up to {MAX_QUANTITY} of an item"}), 400
-            conn.execute(
-                "UPDATE cart SET quantity = quantity + 1 WHERE id = ?",
-                (existing["id"],)
-            )
-        else:
-            conn.execute(
-                "INSERT INTO cart (user_id, product_id, variant, quantity) VALUES (?, ?, ?, 1)",
-                (g.user_id, product_id, variant or "")
-            )
+        if saved is None:
+            return jsonify({"error": f"You can add up to {MAX_QUANTITY} of an item"}), 400
         conn.commit()
 
     return jsonify({"message": "Item added to cart"}), 201
@@ -101,7 +90,7 @@ def add_to_cart():
 def remove_from_cart(item_id):
     with closing(get_db_connection()) as conn:
         conn.execute(
-            "DELETE FROM cart WHERE id = ? AND user_id = ?", (item_id, g.user_id)
+            "DELETE FROM cart WHERE id = %s AND user_id = %s", (item_id, g.user_id)
         )
         conn.commit()
     return jsonify({"message": "Item removed from cart"}), 200
@@ -111,20 +100,18 @@ def remove_from_cart(item_id):
 @login_required
 def decrease_quantity(item_id):
     with closing(get_db_connection()) as conn:
-        item = conn.execute(
-            "SELECT quantity FROM cart WHERE id = ? AND user_id = ?",
+        reduced = conn.execute(
+            "UPDATE cart SET quantity = quantity - 1 "
+            "WHERE id = %s AND user_id = %s AND quantity > 1",
             (item_id, g.user_id)
-        ).fetchone()
-
-        if item is None:
-            return jsonify({"error": "Item not found"}), 404
-
-        if item["quantity"] <= 1:
-            conn.execute("DELETE FROM cart WHERE id = ?", (item_id,))
-        else:
-            conn.execute(
-                "UPDATE cart SET quantity = quantity - 1 WHERE id = ?", (item_id,)
+        )
+        if reduced.rowcount == 0:
+            # Quantity was 1 (remove the line) or the line doesn't exist.
+            removed = conn.execute(
+                "DELETE FROM cart WHERE id = %s AND user_id = %s", (item_id, g.user_id)
             )
+            if removed.rowcount == 0:
+                return jsonify({"error": "Item not found"}), 404
         conn.commit()
 
     return jsonify({"message": "Quantity updated"}), 200
@@ -134,18 +121,18 @@ def decrease_quantity(item_id):
 @login_required
 def increase_quantity(item_id):
     with closing(get_db_connection()) as conn:
-        item = conn.execute(
-            "SELECT quantity FROM cart WHERE id = ? AND user_id = ?",
-            (item_id, g.user_id)
-        ).fetchone()
-
-        if item is None:
-            return jsonify({"error": "Item not found"}), 404
-        if item["quantity"] >= MAX_QUANTITY:
-            return jsonify({"error": f"You can add up to {MAX_QUANTITY} of an item"}), 400
-
-        conn.execute(
-            "UPDATE cart SET quantity = quantity + 1 WHERE id = ?", (item_id,)
+        raised = conn.execute(
+            "UPDATE cart SET quantity = quantity + 1 "
+            "WHERE id = %s AND user_id = %s AND quantity < %s",
+            (item_id, g.user_id, MAX_QUANTITY)
         )
+        if raised.rowcount == 0:
+            # Nothing changed: either the line doesn't exist or it is at the limit.
+            exists = conn.execute(
+                "SELECT 1 FROM cart WHERE id = %s AND user_id = %s", (item_id, g.user_id)
+            ).fetchone()
+            if exists is None:
+                return jsonify({"error": "Item not found"}), 404
+            return jsonify({"error": f"You can add up to {MAX_QUANTITY} of an item"}), 400
         conn.commit()
     return jsonify({"message": "Quantity updated"}), 200

@@ -1,98 +1,112 @@
-import sqlite3
+import json
+from contextlib import closing
+
+import psycopg
+import pytest
 
 from api import create_app
-from api.db import SCHEMA_VERSION
-from conftest import TEST_SECRET
+from api.cart import cart_lines
+from api.db import MIGRATIONS, get_db_connection, migrate
+from conftest import TEST_SECRET, connect_to_test_database, erase_test_schema, run_at_once
+
+LIP_MASK_ID = 6
 
 
-def make_legacy_db(path):
-    """A database shaped like the app before migrations existed."""
-    conn = sqlite3.connect(path)
-    conn.executescript("""
-        CREATE TABLE cart (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT NOT NULL,
-                           price INTEGER NOT NULL, quantity INTEGER NOT NULL DEFAULT 1);
-        CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL);
-        CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-                             items TEXT NOT NULL, total INTEGER NOT NULL, address TEXT,
-                             payment_method TEXT, created_at TEXT NOT NULL);
-        CREATE TABLE addresses (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-                                full_name TEXT NOT NULL, mobile TEXT NOT NULL, pincode TEXT NOT NULL,
-                                flat TEXT NOT NULL, area TEXT NOT NULL, landmark TEXT,
-                                city TEXT NOT NULL, state TEXT NOT NULL, type TEXT NOT NULL);
-        INSERT INTO users (id, username, password_hash) VALUES (1, 'alice', 'x');
-        INSERT INTO cart (product_name, price, quantity) VALUES ('Orphan from before login', 399, 1);
-        INSERT INTO orders (user_id, items, total, created_at) VALUES (1, '[]', 100, 'now');
-        INSERT INTO orders (user_id, items, total, created_at) VALUES (99, '[]', 100, 'now');
-    """)
-    conn.execute("UPDATE cart SET quantity = 1")
-    conn.commit()
-    conn.close()
+def add_user():
+    with connect_to_test_database() as conn:
+        return conn.execute(
+            "INSERT INTO users (username, password_hash) VALUES ('alice', 'x') RETURNING id"
+        ).fetchone()["id"]
 
 
-def test_legacy_database_is_upgraded(tmp_path):
-    path = tmp_path / "legacy.db"
-    make_legacy_db(path)
-
-    create_app({"TESTING": True, "SECRET_KEY": TEST_SECRET, "DATABASE_PATH": str(path)})
-
-    conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-    # Rows without a real owner are gone; Alice's order is kept.
-    assert conn.execute("SELECT COUNT(*) FROM cart").fetchone()[0] == 0
-    assert conn.execute("SELECT user_id FROM orders").fetchall() == [(1,)]
-    # Foreign keys and indexes now exist.
-    for table in ("cart", "addresses", "orders"):
-        assert conn.execute(f"PRAGMA foreign_key_list({table})").fetchall()
-    indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-    assert {"idx_cart_user_id", "idx_addresses_user_id", "idx_orders_user_id"} <= indexes
+def applied_versions():
+    with connect_to_test_database() as conn:
+        rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+    return [row["version"] for row in rows]
 
 
-def test_tampered_legacy_cart_rows_are_repriced(tmp_path):
-    """A cart row saved with a client-chosen price is charged the catalog price."""
-    path = tmp_path / "legacy.db"
-    make_legacy_db(path)
-    conn = sqlite3.connect(path)
-    conn.execute("ALTER TABLE cart ADD COLUMN image TEXT")
-    conn.execute("ALTER TABLE cart ADD COLUMN user_id INTEGER")
-    conn.executemany(
-        "INSERT INTO cart (product_name, price, quantity, user_id) VALUES (?, ?, ?, 1)",
-        [("Lip Mask", 1, 2),                  # real product, fake price
-         ("Something we never sold", 5, 1)],  # unknown -> dropped
-    )
-    conn.commit()
-    conn.close()
+def test_cart_prices_come_from_catalog_and_unknown_products_are_dropped(app):
+    """The cart stores no price, so a saved row can only be charged the catalog price."""
+    user_id = add_user()
+    with connect_to_test_database() as conn:
+        conn.execute(
+            "INSERT INTO cart (user_id, product_id, variant, quantity) "
+            "VALUES (%s, %s, '', 2), (%s, 99999, '', 1)",
+            (user_id, LIP_MASK_ID, user_id),
+        )
 
-    app = create_app({"TESTING": True, "SECRET_KEY": TEST_SECRET, "DATABASE_PATH": str(path)})
+    with app.app_context(), closing(get_db_connection()) as conn:
+        lines = cart_lines(conn, user_id)
 
-    from api.cart import cart_lines
-    from api.db import get_db_connection
-    with app.app_context():
-        lines = cart_lines(get_db_connection(), 1)
     assert [(line["product_name"], line["price"], line["quantity"]) for line in lines] == [
         ("Lip Mask", 399, 2)
     ]
 
 
-def test_migrations_run_once(tmp_path):
-    config = {"TESTING": True, "SECRET_KEY": TEST_SECRET, "DATABASE_PATH": str(tmp_path / "x.db")}
+def test_migrations_run_once():
+    config = {"TESTING": True, "SECRET_KEY": TEST_SECRET}
     create_app(config)
-    create_app(config)   # second start must not fail or re-run steps
+    add_user()
 
-    conn = sqlite3.connect(tmp_path / "x.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    create_app(config)   # a second start must not fail or lose data
+
+    with connect_to_test_database() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"] == 1
+    assert applied_versions() == [version for version, _, _ in MIGRATIONS]
+
+
+def test_simultaneous_starts_apply_each_migration_once():
+    erase_test_schema()
+
+    def start(_):
+        with connect_to_test_database() as conn:
+            migrate(conn)
+
+    run_at_once(8, start)
+
+    assert applied_versions() == [version for version, _, _ in MIGRATIONS]
+
+
+def test_order_items_migration_keeps_existing_orders():
+    """An order saved with the old JSON column keeps every item, in order."""
+    erase_test_schema()
+    with connect_to_test_database() as conn:
+        migrate(conn, up_to=1)
+    user_id = add_user()
+    old_items = [
+        {"product_name": "Lip Mask", "price": 399, "quantity": 2, "image": "lip.jpg"},
+        {"product_name": "Gift (Free gift)", "price": 0, "quantity": 1, "image": "gift.jpg"},
+    ]
+    with connect_to_test_database() as conn:
+        conn.execute("INSERT INTO orders (user_id, items, total) VALUES (%s, %s, 798)",
+                     (user_id, json.dumps(old_items)))
+
+    with connect_to_test_database() as conn:
+        migrate(conn)
+        rows = conn.execute(
+            "SELECT product_name, price, quantity, image FROM order_items ORDER BY id"
+        ).fetchall()
+        columns = {row["column_name"] for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'"
+        )}
+
+    assert rows == old_items
+    assert "items" not in columns
 
 
 def test_foreign_keys_are_enforced(app):
-    from api.db import get_db_connection
-
-    with app.app_context():
-        conn = get_db_connection()
-        try:
+    with app.app_context(), closing(get_db_connection()) as conn:
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
             conn.execute("INSERT INTO cart (user_id, product_id, variant, quantity) "
                          "VALUES (12345, 6, '', 1)")
-            raise AssertionError("insert for a missing user should fail")
-        except sqlite3.IntegrityError:
-            pass
-        finally:
-            conn.close()
+
+
+@pytest.mark.parametrize("address", [
+    "postgresql://user:FAKESECRET%ZZ@localhost:5432/x",   # broken percent-encoding
+    "postgresql://user:FAKESECRET@localhost:notaport/x",
+])
+def test_bad_database_address_is_not_repeated_in_errors(app, address):
+    app.config["DATABASE_URL"] = address
+    with app.app_context(), pytest.raises(Exception) as caught:
+        get_db_connection()
+    assert "FAKESECRET" not in str(caught.value)

@@ -1,7 +1,9 @@
 import logging
 import os
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # backend/
+from dotenv import load_dotenv
+
+BASE_DIR =os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # backend/
 DEV_SECRET_KEY = "dev-only-insecure-key-change-me-in-production"
 
 log = logging.getLogger(__name__)
@@ -12,6 +14,9 @@ def load_config(overrides=None):
 
     `overrides` (used by tests) wins over the environment.
     """
+    # Local settings from backend/.env. Real environment variables win.
+    load_dotenv(os.path.join(BASE_DIR, ".env"))
+
     overrides = overrides or {}
     app_env = overrides.get("APP_ENV") or os.environ.get("APP_ENV", "development")
 
@@ -33,7 +38,7 @@ def load_config(overrides=None):
     config = {
         "APP_ENV": app_env,
         "SECRET_KEY": secret_key,
-        "DATABASE_PATH": os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "cart.db")),
+        "DATABASE_URL": os.environ.get("DATABASE_URL", ""),   # contains a password: never log it
         "CORS_ORIGINS": cors_origins,
         "TOKEN_HOURS": 12,
         # Session cookies are sent only over HTTPS in production.

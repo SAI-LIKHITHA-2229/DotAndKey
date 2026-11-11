@@ -1,10 +1,9 @@
-import datetime
-import json
+from collections import defaultdict
 from contextlib import closing
 
 from flask import Blueprint, g, jsonify
 
-from .addresses import address_to_text
+from .addresses import ADDRESS_COLUMNS, address_to_text
 from .auth import login_required
 from .cart import cart_lines
 from .db import get_db_connection
@@ -20,9 +19,8 @@ bp = Blueprint("orders", __name__)
 # Orders start "confirmed"; a fulfilment system would move them to
 # "shipped" and "delivered". Prepaid methods use a demo payment step (no
 # money is taken), recorded honestly as "demo_paid"; cash on delivery and
-# pay later stay "pending" until the customer pays.
-ORDER_STATUSES = ("confirmed", "shipped", "delivered", "cancelled")
-PAYMENT_STATUSES = ("pending", "demo_paid")
+# pay later stay "pending" until the customer pays. The orders table only
+# accepts known status values.
 
 
 @bp.route("/checkout/summary")
@@ -30,7 +28,6 @@ PAYMENT_STATUSES = ("pending", "demo_paid")
 def checkout_summary():
     with closing(get_db_connection()) as conn:
         items = cart_lines(conn, g.user_id)
-        conn.commit()
 
     subtotal, discount, bill_total = price_cart(items)
     max_gifts = max_gifts_for(bill_total)
@@ -60,6 +57,31 @@ def checkout_summary():
     })
 
 
+def take_stock(conn, lines):
+    """Reduce stock for an order, or return a message if something has run out.
+
+    Rows are locked in one fixed order, so two orders can never each hold a
+    row the other is waiting for. If a message comes back, the caller's
+    transaction is rolled back and every reduction made here is undone.
+    """
+    for line in sorted(lines, key=lambda line: (line["product_id"], line["variant"] or "")):
+        key = (line["product_id"], line["variant"] or "")
+        stock = conn.execute(
+            "SELECT quantity FROM inventory WHERE product_id = %s AND variant = %s FOR UPDATE",
+            key
+        ).fetchone()
+        available = stock["quantity"] if stock else 0
+        if available == 0:
+            return f"{line['product_name']} is out of stock"
+        if available < line["quantity"]:
+            return f"Only {available} left of {line['product_name']}"
+        conn.execute(
+            "UPDATE inventory SET quantity = quantity - %s WHERE product_id = %s AND variant = %s",
+            (line["quantity"], *key)
+        )
+    return None
+
+
 @bp.route("/orders", methods=["POST"])
 @login_required
 def place_order():
@@ -77,13 +99,15 @@ def place_order():
         return jsonify({"error": "Choose an option for this payment method"}), 400
 
     with closing(get_db_connection()) as conn:
-        # Lock the database for the whole order so the cart cannot change
-        # between reading it and emptying it. Early returns roll back.
-        conn.execute("BEGIN IMMEDIATE")
+        # Locks are always taken in this order: the user, their cart rows, then
+        # stock rows. Until commit the cart can't change, and a second order
+        # from the same user waits here and then finds the cart empty.
+        conn.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (g.user_id,))
+        conn.execute("SELECT id FROM cart WHERE user_id = %s ORDER BY id FOR UPDATE", (g.user_id,))
 
         # Only this user's own addresses can be used.
         address_row = conn.execute(
-            "SELECT * FROM addresses WHERE id = ? AND user_id = ?",
+            f"SELECT {ADDRESS_COLUMNS} FROM addresses WHERE id = %s AND user_id = %s",
             (address_id, g.user_id)
         ).fetchone()
         if address_row is None:
@@ -92,9 +116,10 @@ def place_order():
 
         # Snapshot the current catalog price: the order keeps what was paid
         # even if the catalog changes later.
+        lines = cart_lines(conn, g.user_id)
         items = [
             {key: line[key] for key in ("product_name", "price", "quantity", "image")}
-            for line in cart_lines(conn, g.user_id)
+            for line in lines
         ]
         if not items:
             return jsonify({"error": "Your cart is empty"}), 400
@@ -117,6 +142,10 @@ def place_order():
                 return jsonify({"error": "Invalid free gift selection"}), 400
             gifts = [gift_lookup[name] for name in chosen_gifts]
 
+        stock_problem = take_stock(conn, lines)
+        if stock_problem:
+            return jsonify({"error": stock_problem}), 409
+
         gift_items = [
             {
                 "product_name": f"{gift['name']} (Free gift)",
@@ -130,17 +159,22 @@ def place_order():
         _, total = method_total(bill_total, method)
         payment_text = method["title"] + (f" · {option}" if option else "")
         payment_status = "demo_paid" if method["prepaid"] else "pending"
-        created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        cursor = conn.execute(
-            "INSERT INTO orders (user_id, items, total, address, payment_method, "
-            "payment_status, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?)",
-            (g.user_id, json.dumps(items + gift_items), total, address_text,
-             payment_text, payment_status, created_at)
-        )
-        conn.execute("DELETE FROM cart WHERE user_id = ?", (g.user_id,))
+        order_id = conn.execute(
+            "INSERT INTO orders (user_id, total, address, payment_method, "
+            "payment_status, status) VALUES (%s, %s, %s, %s, %s, 'confirmed') "
+            "RETURNING id",
+            (g.user_id, total, address_text, payment_text, payment_status)
+        ).fetchone()["id"]
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO order_items (order_id, product_name, price, quantity, image) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                [(order_id, item["product_name"], item["price"], item["quantity"], item["image"])
+                 for item in items + gift_items]
+            )
+        conn.execute("DELETE FROM cart WHERE user_id = %s", (g.user_id,))
         conn.commit()
-        order_id = cursor.lastrowid
 
     return jsonify({"message": "Order placed", "order_id": order_id, "total": total,
                     "status": "confirmed", "payment_status": payment_status}), 201
@@ -150,13 +184,24 @@ def place_order():
 @login_required
 def list_orders():
     with closing(get_db_connection()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM orders WHERE user_id = ? ORDER BY id DESC", (g.user_id,)
+        orders = conn.execute(
+            "SELECT id, total, address, payment_method, status, payment_status, "
+            "created_at FROM orders WHERE user_id = %s ORDER BY id DESC",
+            (g.user_id,)
+        ).fetchall()
+        # One query for every item, instead of one query per order.
+        item_rows = conn.execute(
+            "SELECT i.order_id, i.product_name, i.price, i.quantity, i.image "
+            "FROM order_items i JOIN orders o ON o.id = i.order_id "
+            "WHERE o.user_id = %s ORDER BY i.id",
+            (g.user_id,)
         ).fetchall()
 
-    orders = []
-    for row in rows:
-        order = dict(row)
-        order["items"] = json.loads(order["items"])
-        orders.append(order)
+    items_by_order = defaultdict(list)
+    for item in item_rows:
+        items_by_order[item.pop("order_id")].append(item)
+
+    for order in orders:
+        order["items"] = items_by_order[order["id"]]
+        order["created_at"] = order["created_at"].isoformat()
     return jsonify(orders)

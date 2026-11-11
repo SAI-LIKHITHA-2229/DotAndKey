@@ -1,6 +1,6 @@
 from api.cart import MAX_QUANTITY
 from api.catalog import PRODUCTS, PRODUCTS_BY_ID
-from conftest import make_user
+from conftest import connect_to_test_database, make_user, requests_at_once
 
 MOISTURIZER_ID = 1
 LIP_MASK_ID = 6          # a product without variants
@@ -56,6 +56,25 @@ def test_quantity_is_capped(client, auth):
     assert client.put(f"/cart/{item['id']}/increase", headers=auth).status_code == 400
 
 
+def test_simultaneous_adds_never_pass_the_limit(app, client, auth):
+    codes = requests_at_once(app, MAX_QUANTITY + 6, lambda c: add(c, auth))
+
+    assert sorted(codes) == [201] * MAX_QUANTITY + [400] * 6
+    assert client.get("/cart", headers=auth).get_json()[0]["quantity"] == MAX_QUANTITY
+
+
+def test_simultaneous_increases_never_pass_the_limit(app, client, auth):
+    add(client, auth)
+    item_id = client.get("/cart", headers=auth).get_json()[0]["id"]
+
+    codes = requests_at_once(
+        app, MAX_QUANTITY + 5, lambda c: c.put(f"/cart/{item_id}/increase", headers=auth)
+    )
+
+    assert sorted(codes) == [200] * (MAX_QUANTITY - 1) + [400] * 6
+    assert client.get("/cart", headers=auth).get_json()[0]["quantity"] == MAX_QUANTITY
+
+
 def test_increase_decrease_and_remove(client, auth):
     add(client, auth)
     [item] = client.get("/cart", headers=auth).get_json()
@@ -85,6 +104,17 @@ def test_discontinued_products_leave_the_cart(client, auth, monkeypatch):
     monkeypatch.delitem(PRODUCTS_BY_ID, LIP_MASK_ID)
 
     assert client.get("/cart", headers=auth).get_json() == []
+
+
+def test_reading_the_cart_never_deletes_rows(client, auth, monkeypatch):
+    add(client, auth, product_id=LIP_MASK_ID, variant=None)
+    monkeypatch.delitem(PRODUCTS_BY_ID, LIP_MASK_ID)
+
+    client.get("/cart", headers=auth)
+    client.get("/checkout/summary", headers=auth)
+
+    with connect_to_test_database() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM cart").fetchone()["n"] == 1
 
 
 def test_users_cannot_touch_each_others_cart(client, auth):

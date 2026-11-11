@@ -1,243 +1,182 @@
 import logging
-import sqlite3
 from contextlib import closing
 
+import psycopg
 from flask import current_app
+from psycopg.rows import dict_row
+
+from .catalog import PRODUCTS
 
 log = logging.getLogger(__name__)
 
 
 def get_db_connection():
-    # timeout / busy_timeout: wait for a lock instead of failing or hanging.
-    conn = sqlite3.connect(current_app.config["DATABASE_PATH"], timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout = 5000")
-    # SQLite only enforces foreign keys when asked to, per connection.
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    """Open a new PostgreSQL connection. The caller must close it."""
+    url = current_app.config["DATABASE_URL"]
+    if not url:
+        raise RuntimeError("DATABASE_URL is not set")
+    try:
+        # dict_row: read columns by name, as in row["id"].
+        # connect_timeout: give up after 10 seconds instead of hanging.
+        return psycopg.connect(url, row_factory=dict_row, connect_timeout=10)
+    except psycopg.ProgrammingError:
+        # A malformed address: the driver's message could repeat the password.
+        raise RuntimeError("DATABASE_URL is not a valid PostgreSQL address") from None
 
 
 # ---- Migrations ----
-# Each step upgrades the schema by one version. The database remembers its
-# version in PRAGMA user_version, so every step runs exactly once.
-# Never edit a released step; add a new one instead.
-
-def _v1_initial_schema(conn):
-    """The original tables (no-ops on databases that already have them)."""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS cart (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_name TEXT NOT NULL,
-            price INTEGER NOT NULL,
-            quantity INTEGER NOT NULL DEFAULT 1,
-            image TEXT
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            password_hash TEXT NOT NULL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            items TEXT NOT NULL,
-            total INTEGER NOT NULL,
-            address TEXT,
-            payment_method TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS addresses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            full_name TEXT NOT NULL,
-            mobile TEXT NOT NULL,
-            pincode TEXT NOT NULL,
-            flat TEXT NOT NULL,
-            area TEXT NOT NULL,
-            landmark TEXT,
-            city TEXT NOT NULL,
-            state TEXT NOT NULL,
-            type TEXT NOT NULL
-        )
-    """)
-
-    # Very old databases were created before these cart columns existed.
-    columns = [row["name"] for row in conn.execute("PRAGMA table_info(cart)")]
-    if "image" not in columns:
-        conn.execute("ALTER TABLE cart ADD COLUMN image TEXT")
-    if "user_id" not in columns:
-        conn.execute("ALTER TABLE cart ADD COLUMN user_id INTEGER")
-
-
-def _v2_foreign_keys_and_indexes(conn):
-    """Tie every row to a real user and index the per-user lookups.
-
-    SQLite cannot add a foreign key to an existing table, so each table is
-    rebuilt and its rows copied across. Rows whose user no longer exists
-    (e.g. old carts saved before login existed) are dropped.
+# Each entry upgrades the schema once, and schema_migrations remembers which
+# ones have run. Never edit a released entry; add a new one instead.
+_INITIAL_SCHEMA = (
     """
-    conn.execute("""
-        CREATE TABLE cart_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            product_name TEXT NOT NULL,
-            price INTEGER NOT NULL,
-            quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
-            image TEXT
-        )
-    """)
-    conn.execute("""
-        INSERT INTO cart_new (id, user_id, product_name, price, quantity, image)
-        SELECT id, user_id, product_name, price, quantity, image FROM cart
-        WHERE user_id IN (SELECT id FROM users) AND quantity > 0
-    """)
-
-    conn.execute("""
-        CREATE TABLE addresses_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            full_name TEXT NOT NULL,
-            mobile TEXT NOT NULL,
-            pincode TEXT NOT NULL,
-            flat TEXT NOT NULL,
-            area TEXT NOT NULL,
-            landmark TEXT,
-            city TEXT NOT NULL,
-            state TEXT NOT NULL,
-            type TEXT NOT NULL
-        )
-    """)
-    conn.execute("""
-        INSERT INTO addresses_new SELECT * FROM addresses
-        WHERE user_id IN (SELECT id FROM users)
-    """)
-
-    conn.execute("""
-        CREATE TABLE orders_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            items TEXT NOT NULL,
-            total INTEGER NOT NULL,
-            address TEXT,
-            payment_method TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
-    conn.execute("""
-        INSERT INTO orders_new SELECT * FROM orders
-        WHERE user_id IN (SELECT id FROM users)
-    """)
-
-    for table in ("cart", "addresses", "orders"):
-        conn.execute(f"DROP TABLE {table}")
-        conn.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
-        conn.execute(f"CREATE INDEX idx_{table}_user_id ON {table}(user_id)")
-
-
-def _v3_cart_references_catalog(conn):
-    """Store what was chosen (product_id + variant), not a copy of its price.
-
-    Prices, names and images are looked up in the catalog whenever the cart
-    is read, so a stale or tampered price can never reach checkout. Existing
-    rows are matched to the catalog by name; rows that match nothing are dropped.
+    CREATE TABLE IF NOT EXISTS users (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        username TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        token_version INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    # Usernames are unique ignoring case: Alice and alice are the same person.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (lower(username))",
     """
-    from .catalog import PRODUCTS
+    CREATE TABLE IF NOT EXISTS cart (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL,
+        variant TEXT NOT NULL DEFAULT '',
+        quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+        UNIQUE (user_id, product_id, variant)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS addresses (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        full_name TEXT NOT NULL,
+        mobile TEXT NOT NULL,
+        pincode TEXT NOT NULL,
+        flat TEXT NOT NULL,
+        area TEXT NOT NULL,
+        landmark TEXT,
+        city TEXT NOT NULL,
+        state TEXT NOT NULL,
+        type TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_addresses_user_id ON addresses (user_id)",
+    # RESTRICT: a user who has orders can't be deleted, so history is never lost.
+    """
+    CREATE TABLE IF NOT EXISTS orders (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        items TEXT NOT NULL,
+        total INTEGER NOT NULL,
+        address TEXT,
+        payment_method TEXT,
+        status TEXT NOT NULL DEFAULT 'confirmed'
+            CHECK (status IN ('confirmed', 'shipped', 'delivered', 'cancelled')),
+        payment_status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (payment_status IN ('pending', 'demo_paid')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders (user_id)",
+)
 
-    names = {}
-    for product in PRODUCTS:
-        variants = product.get("variants") or []
-        if not variants:
-            names[product["name"]] = (product["id"], "")
-        for variant in variants:
-            names[f"{product['name']} ({variant['label']})"] = (product["id"], variant["label"])
 
+# Moves each order's items out of the JSON text column into their own rows.
+_ORDER_ITEMS = (
+    """
+    CREATE TABLE order_items (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        order_id BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        product_name TEXT NOT NULL,
+        price INTEGER NOT NULL CHECK (price >= 0),
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        image TEXT
+    )
+    """,
+    "CREATE INDEX idx_order_items_order_id ON order_items (order_id)",
+    """
+    INSERT INTO order_items (order_id, product_name, price, quantity, image)
+    SELECT o.id, entry.item->>'product_name', (entry.item->>'price')::integer,
+           (entry.item->>'quantity')::integer, entry.item->>'image'
+    FROM orders o
+    CROSS JOIN LATERAL jsonb_array_elements(o.items::jsonb) WITH ORDINALITY AS entry(item, place)
+    ORDER BY o.id, entry.place
+    """,
+    "ALTER TABLE orders DROP COLUMN items",
+)
+
+_INVENTORY = (
+    """
+    CREATE TABLE inventory (
+        product_id INTEGER NOT NULL,
+        variant TEXT NOT NULL DEFAULT '',
+        quantity INTEGER NOT NULL CHECK (quantity >= 0),
+        PRIMARY KEY (product_id, variant)
+    )
+    """,
+)
+
+MIGRATIONS = (
+    (1, "initial_schema", _INITIAL_SCHEMA),
+    (2, "order_items", _ORDER_ITEMS),
+    (3, "inventory", _INVENTORY),
+)
+
+# Any number works, as long as every copy of the app uses the same one.
+MIGRATION_LOCK_ID = 726354
+
+
+def migrate(conn, up_to=None):
+    """Apply the missing migrations in one transaction and commit it.
+
+    `up_to` stops at an earlier version; tests use it to build an old schema.
+    """
+    # Only one process migrates at a time. The lock ends with the transaction.
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (MIGRATION_LOCK_ID,))
     conn.execute("""
-        CREATE TABLE cart_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            product_id INTEGER NOT NULL,
-            variant TEXT NOT NULL DEFAULT '',
-            quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
-            UNIQUE (user_id, product_id, variant)
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
-    for row in conn.execute("SELECT id, user_id, product_name, quantity FROM cart").fetchall():
-        match = names.get(row["product_name"])
-        if match is None:
+    applied = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
+
+    for version, name, statements in MIGRATIONS:
+        if version in applied or (up_to is not None and version > up_to):
             continue
-        conn.execute(
-            "INSERT INTO cart_new (id, user_id, product_id, variant, quantity) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT (user_id, product_id, variant) DO UPDATE SET quantity = quantity + excluded.quantity",
-            (row["id"], row["user_id"], match[0], match[1], row["quantity"])
+        for statement in statements:
+            conn.execute(statement)
+        conn.execute("INSERT INTO schema_migrations (version, name) VALUES (%s, %s)",
+                     (version, name))
+        log.info("Applied database migration %d (%s)", version, name)
+    conn.commit()
+
+
+INITIAL_STOCK = 100
+
+
+def sync_inventory(conn):
+    """Give every catalog item a stock row. Existing counts are left alone."""
+    rows = [
+        (product["id"], variant["label"], INITIAL_STOCK)
+        for product in PRODUCTS
+        # A product without variants gets one row, with an empty variant name.
+        for variant in (product.get("variants") or [{"label": ""}])
+    ]
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO inventory (product_id, variant, quantity) VALUES (%s, %s, %s) "
+            "ON CONFLICT (product_id, variant) DO NOTHING",
+            rows,
         )
-    conn.execute("DROP TABLE cart")
-    conn.execute("ALTER TABLE cart_new RENAME TO cart")
-    conn.execute("CREATE INDEX idx_cart_user_id ON cart(user_id)")
-
-
-def _v4_token_version(conn):
-    """Bumping a user's token_version invalidates every token issued before."""
-    conn.execute("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
-
-
-def _v5_order_status(conn):
-    """Store order and payment status on the server instead of guessing them."""
-    conn.execute("ALTER TABLE orders ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'")
-    conn.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'")
-    # Existing card / wallet / netbanking orders went through the demo PIN page.
-    conn.execute("""
-        UPDATE orders SET payment_status = 'demo_paid'
-        WHERE payment_method LIKE 'Debit/Credit cards%'
-           OR payment_method LIKE 'Wallets%'
-           OR payment_method LIKE 'Netbanking%'
-    """)
-
-
-MIGRATIONS = [
-    _v1_initial_schema,
-    _v2_foreign_keys_and_indexes,
-    _v3_cart_references_catalog,
-    _v4_token_version,
-    _v5_order_status,
-]
-SCHEMA_VERSION = len(MIGRATIONS)
-
-
-def migrate(conn):
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
-
-    for number, step in enumerate(MIGRATIONS, start=1):
-        if number <= version:
-            continue
-
-        # Foreign keys must be off while tables are rebuilt; the
-        # foreign_key_check below verifies the result before committing.
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("BEGIN")
-        try:
-            step(conn)
-            problems = conn.execute("PRAGMA foreign_key_check").fetchall()
-            if problems:
-                raise RuntimeError(f"Migration {number} left broken references: {problems}")
-            conn.execute(f"PRAGMA user_version = {number}")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.execute("PRAGMA foreign_keys = ON")
-        log.info("Database migrated to version %d", number)
+    conn.commit()
 
 
 def init_db():
     with closing(get_db_connection()) as conn:
-        # WAL lets readers and a writer work concurrently without blocking,
-        # which keeps the dev server from wedging under rapid clicks.
-        conn.execute("PRAGMA journal_mode = WAL")
         migrate(conn)
+        sync_inventory(conn)

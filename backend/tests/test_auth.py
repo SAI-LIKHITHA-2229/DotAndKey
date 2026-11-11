@@ -1,9 +1,8 @@
 import datetime
-import sqlite3
 
 import jwt
 
-from conftest import TEST_SECRET, make_user
+from conftest import TEST_SECRET, connect_to_test_database, make_user
 
 CSRF = {"X-Requested-With": "XMLHttpRequest"}
 
@@ -68,12 +67,10 @@ def test_logout_clears_the_cookie(client):
     assert client.get("/me").status_code == 401
 
 
-def test_tokens_for_deleted_users_are_rejected(app, client):
+def test_tokens_for_deleted_users_are_rejected(client):
     header = make_user(client)
-    conn = sqlite3.connect(app.config["DATABASE_PATH"])
-    conn.execute("DELETE FROM users")
-    conn.commit()
-    conn.close()
+    with connect_to_test_database() as conn:
+        conn.execute("DELETE FROM users")
 
     assert client.get("/cart", headers=header).status_code == 401
 
@@ -99,6 +96,13 @@ def test_usernames_are_unique_ignoring_case(client):
     make_user(client, "Alice")
     response = client.post("/register", json={"username": "alice", "password": "password123"})
     assert response.status_code == 409
+
+
+def test_login_ignores_username_case(client):
+    client.post("/register", json={"username": "Alice", "password": "password123"})
+    response = login(client, username="aLiCe")
+    assert response.status_code == 200
+    assert response.get_json()["username"] == "Alice"
 
 
 def test_login_uses_same_message_for_unknown_user_and_wrong_password(client):
