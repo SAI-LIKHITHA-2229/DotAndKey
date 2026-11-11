@@ -611,9 +611,14 @@ body.cart-page {
     100% { transform: translateX(-14px); }
 }
 
+/* inline-block: a plain inline <small> ignores vertical margin, so its
+   padding spilled up over the line above. As a box it takes real space. */
 .prepaid-note {
-    margin-top: 10px;
-    padding: 9px 14px;
+    display: inline-block;
+    max-width: 100%;
+    margin-top: 6px;
+    padding: 5px 10px;
+    line-height: 1.35;
     background: #fff0f6;
     color: #b3286c;
     border: 1px dashed #e59ac2;
